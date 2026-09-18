@@ -21,6 +21,14 @@ class QualitySelectorTest {
     }
 
     @Test
+    fun authenticatedYouTubeClientAvoidsBrokenLoggedInDefault() {
+        assertEquals(
+            "youtube:player_client=default,web_embedded",
+            YtDlpClient.authenticatedExtractorArgsForTest()
+        )
+    }
+
+    @Test
     fun download403IsRecoverable() {
         assertTrue(
             YtDlpClient.isRecoverableDownloadError(
