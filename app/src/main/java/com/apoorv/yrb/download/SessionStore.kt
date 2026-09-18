@@ -123,6 +123,17 @@ class SessionStore(private val context: Context) {
             SessionCookieValidator.looksAuthenticated(netscape)
         }.getOrDefault(false)
 
+    fun refreshFromWebViewDatabaseIfAvailable(): Boolean {
+        val snapshot = readWebViewCookieDatabase().getOrNull() ?: return false
+        if (!SessionCookieValidator.looksAuthenticated(snapshot)) return false
+
+        return runCatching {
+            cookieFile.parentFile?.mkdirs()
+            cookieFile.writeText(snapshot)
+            status().connected
+        }.getOrDefault(false)
+    }
+
     fun captureFromWebView(
         cookieManager: CookieManager,
         userAgent: String
