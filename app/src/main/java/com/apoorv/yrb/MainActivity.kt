@@ -772,7 +772,8 @@ class MainActivity : ComponentActivity() {
         onOpenJob: (String) -> Unit
     ) {
         val store = remember { HistoryStore(this@MainActivity) }
-        val history = remember(historyVersion) { store.readAll() }
+        var localRefresh by remember { mutableIntStateOf(0) }
+        val history = remember(historyVersion, localRefresh) { store.readAll() }
 
         if (history.isEmpty()) {
             Box(
@@ -807,7 +808,7 @@ class MainActivity : ComponentActivity() {
                     TextButton(
                         onClick = {
                             store.clearFinished()
-                            historyVersion++
+                            localRefresh++
                         }
                     ) {
                         Text("Clear finished")
