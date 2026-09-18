@@ -12,6 +12,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -82,6 +83,7 @@ import com.apoorv.yrb.data.HistoryStore
 import com.apoorv.yrb.download.DownloadService
 import com.apoorv.yrb.download.FileSizeFormatter
 import com.apoorv.yrb.download.QualityOption
+import com.apoorv.yrb.download.SessionStore
 import com.apoorv.yrb.download.VideoInspection
 import com.apoorv.yrb.download.YtDlpClient
 import com.apoorv.yrb.ui.theme.YrbTheme
@@ -274,6 +276,25 @@ class MainActivity : ComponentActivity() {
         var loading by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
+        val sessionStore = remember { SessionStore(this@MainActivity) }
+        var sessionStatus by remember { mutableStateOf(sessionStore.status()) }
+        var sessionNotice by remember { mutableStateOf<String?>(null) }
+        val sessionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            if (uri != null) {
+                sessionStore.importFrom(uri)
+                    .onSuccess {
+                        sessionStatus = it
+                        sessionNotice = "YouTube session connected. Retry the video."
+                        error = null
+                    }
+                    .onFailure {
+                        sessionNotice = null
+                        error = it.message ?: "Could not import this YouTube session."
+                    }
+            }
+        }
 
         LazyColumn(
             modifier = modifier.fillMaxSize(),
@@ -353,6 +374,96 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    color = if (sessionStatus.connected) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (sessionStatus.connected) {
+                                Icon(
+                                    Icons.Rounded.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "YouTube session",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    if (sessionStatus.connected) {
+                                        "Connected • stored only on this device"
+                                    } else {
+                                        "Optional. Connect once if YouTube blocks anonymous downloads."
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = {
+                                    sessionLauncher.launch(
+                                        arrayOf(
+                                            "text/plain",
+                                            "text/*",
+                                            "application/octet-stream"
+                                        )
+                                    )
+                                }
+                            ) {
+                                Text(
+                                    if (sessionStatus.connected) {
+                                        "Replace session"
+                                    } else {
+                                        "Import session"
+                                    }
+                                )
+                            }
+
+                            if (sessionStatus.connected) {
+                                TextButton(
+                                    onClick = {
+                                        sessionStore.clear()
+                                        sessionStatus = sessionStore.status()
+                                        sessionNotice = "YouTube session removed."
+                                    }
+                                ) {
+                                    Text("Remove")
+                                }
+                            }
+                        }
+
+                        sessionNotice?.let { notice ->
+                            Text(
+                                notice,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+
             if (loading) {
                 item {
                     Surface(
@@ -386,21 +497,48 @@ class MainActivity : ComponentActivity() {
                         shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Icon(
-                                Icons.Rounded.ErrorOutline,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                message,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    message,
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            if (requiresYouTubeSession(message)) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        sessionLauncher.launch(
+                                            arrayOf(
+                                                "text/plain",
+                                                "text/*",
+                                                "application/octet-stream"
+                                            )
+                                        )
+                                    }
+                                ) {
+                                    Text(
+                                        if (sessionStatus.connected) {
+                                            "Replace YouTube session"
+                                        } else {
+                                            "Import YouTube session"
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1078,6 +1216,15 @@ class MainActivity : ComponentActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runCatching { startActivity(intent) }
+    }
+
+    private fun requiresYouTubeSession(message: String): Boolean {
+        val normalized = message.lowercase()
+        return normalized.contains("sign in to confirm") ||
+            normalized.contains("not a bot") ||
+            normalized.contains("authenticated session") ||
+            normalized.contains("po token") ||
+            normalized.contains("every anonymous playback route")
     }
 
     private fun isYouTubeUrl(value: String): Boolean =
