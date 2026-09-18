@@ -19,7 +19,9 @@ data class QualityOption(
     val estimatedBytes: Long?,
     val approximate: Boolean,
     val extractorArgs: String? = null,
-    val forceIpv4: Boolean = false
+    val forceIpv4: Boolean = false,
+    val clientKey: String = "default",
+    val audioLanguageId: String = "default"
 ) {
     val label: String
         get() = if (height == 2160) "4K" else height.toString() + "p"
@@ -45,7 +47,8 @@ object QualitySelector {
 private data class InspectionMode(
     val key: String,
     val extractorArgs: String? = null,
-    val forceIpv4: Boolean = false
+    val forceIpv4: Boolean = false,
+    val preferHls: Boolean = false
 )
 
 private data class FormatCandidate(
@@ -99,12 +102,9 @@ object YtDlpClient {
     private val MODE_DEFAULT = InspectionMode("default")
     private val MODE_IPV4 = InspectionMode("ipv4", forceIpv4 = true)
     private val MODE_WEB_SAFARI = InspectionMode(
-        "web_safari",
-        extractorArgs = "youtube:player_client=web_safari"
-    )
-    private val MODE_ANDROID_VR = InspectionMode(
-        "android_vr",
-        extractorArgs = "youtube:player_client=android_vr"
+        "web_safari_hls",
+        extractorArgs = "youtube:player_client=default,web_safari",
+        preferHls = true
     )
     private val MODE_WEB_EMBEDDED = InspectionMode(
         "web_embedded",
@@ -115,7 +115,6 @@ object YtDlpClient {
         MODE_DEFAULT,
         MODE_IPV4,
         MODE_WEB_SAFARI,
-        MODE_ANDROID_VR,
         MODE_WEB_EMBEDDED
     )
 
@@ -238,9 +237,8 @@ object YtDlpClient {
             }
         }
 
-        val usableCandidates = if (mode.key == MODE_WEB_SAFARI.key) {
+        val usableCandidates = if (mode.preferHls) {
             candidates.filter { it.protocol.contains("m3u8", ignoreCase = true) }
-                .ifEmpty { candidates }
         } else {
             candidates
         }
@@ -308,6 +306,7 @@ object YtDlpClient {
                 audio = chosenAudio,
                 durationSeconds = duration,
                 allowCombinedFallback = languageIds.size == 1,
+                languageId = languageId,
                 mode = mode
             )
         }.filterValues { it.isNotEmpty() }
@@ -340,6 +339,7 @@ object YtDlpClient {
         audio: FormatCandidate?,
         durationSeconds: Long?,
         allowCombinedFallback: Boolean,
+        languageId: String,
         mode: InspectionMode
     ): List<QualityOption> {
         return QualitySelector.supported.mapNotNull { height ->
@@ -367,7 +367,9 @@ object YtDlpClient {
                     estimatedBytes = total,
                     approximate = videoApprox || audioApprox,
                     extractorArgs = mode.extractorArgs,
-                    forceIpv4 = mode.forceIpv4
+                    forceIpv4 = mode.forceIpv4,
+                    clientKey = mode.key,
+                    audioLanguageId = languageId
                 )
             } else if (allowCombinedFallback) {
                 val combined = exact
@@ -386,7 +388,9 @@ object YtDlpClient {
                     estimatedBytes = bytes,
                     approximate = approximate,
                     extractorArgs = mode.extractorArgs,
-                    forceIpv4 = mode.forceIpv4
+                    forceIpv4 = mode.forceIpv4,
+                    clientKey = mode.key,
+                    audioLanguageId = languageId
                 )
             } else {
                 null
@@ -416,7 +420,7 @@ object YtDlpClient {
             message.contains("not a bot") ||
             message.contains("http error 403")
         ) {
-            "YouTube blocked anonymous extraction on this network. Yrb tried the default client, IPv4, web_safari, android_vr and web_embedded fallbacks."
+            "YouTube blocked every anonymous extraction route Yrb could use for this video."
         } else {
             ProgressLineParser.humanError(error.message)
         }
@@ -442,6 +446,46 @@ object YtDlpClient {
         } else {
             display
         }
+    }
+
+    fun recoveryCandidates(
+        context: Context,
+        url: String,
+        height: Int,
+        audioLanguageId: String,
+        currentClientKey: String
+    ): List<QualityOption> {
+        YtDlpRuntime.refreshIfDue(context, force = true)
+
+        return anonymousModes
+            .filter { it.key != currentClientKey }
+            .mapNotNull { mode ->
+                runCatching { inspectOnce(url.trim(), mode) }
+                    .getOrNull()
+                    ?.let { inspection ->
+                        val languageId = when {
+                            inspection.qualitiesByLanguage.containsKey(audioLanguageId) ->
+                                audioLanguageId
+                            else -> inspection.defaultLanguageId
+                        }
+                        inspection.qualities(languageId)
+                            .firstOrNull { it.height == height }
+                    }
+            }
+            .distinctBy { it.clientKey + "|" + it.selector }
+    }
+
+    fun isRecoverableDownloadError(error: Throwable): Boolean {
+        val message = generateSequence(error) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString("\n")
+            .lowercase()
+
+        return message.contains("http error 403") ||
+            message.contains("403 forbidden") ||
+            message.contains("unable to download video data") ||
+            message.contains("po token") ||
+            message.contains("forbidden")
     }
 
     internal fun anonymousFallbackNamesForTest(): List<String> =
