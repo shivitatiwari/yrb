@@ -236,7 +236,7 @@ class DownloadService : Service() {
                     monitorJob.cancel()
                     monitorJob.join()
 
-                    val attemptFile = findCompletedMediaFile(jobDir, attemptResponse)
+                    val attemptFile = findCompletedMediaFile(rootDir, attemptResponse)
                     if (attemptFile == null || attemptFile.length() <= 0L) {
                         throw IllegalStateException("unable to download video data: empty output")
                     }
@@ -318,25 +318,12 @@ class DownloadService : Service() {
             }
             broadcastHistoryChange(jobId)
 
-            val sourceFile = successfulSourceFile
-                ?: findCompletedMediaFile(jobDir, successfulResponse)
+            val finalFile = successfulSourceFile
+                ?: findCompletedMediaFile(rootDir, successfulResponse)
                 ?: error("yt-dlp finished but the completed media file could not be located.")
 
-            if (sourceFile.length() <= 0L) {
-                error("unable to download video data: empty output")
-            }
-
-            val finalFile = File(rootDir, sourceFile.name)
-            if (finalFile.exists()) finalFile.delete()
-
-            val moved = sourceFile.renameTo(finalFile)
-            if (!moved) {
-                sourceFile.copyTo(finalFile, overwrite = true)
-                sourceFile.delete()
-            }
-
             if (!finalFile.exists() || finalFile.length() <= 0L) {
-                error("The completed file could not be moved into Downloads/Yrb.")
+                error("unable to download video data: empty output")
             }
 
             MediaScannerConnection.scanFile(
@@ -416,18 +403,19 @@ class DownloadService : Service() {
     }
 
     private fun findCompletedMediaFile(
-        jobDir: File,
+        rootDir: File,
         response: YoutubeDLResponse
     ): File? {
-        val printedPath = response.out
+        return response.out
             .lineSequence()
             .map { it.trim() }
-            .lastOrNull { it.startsWith(jobDir.absolutePath) }
-
-        return printedPath?.let(::File)?.takeIf { it.exists() }
-            ?: jobDir.listFiles()
-                ?.filter { it.isFile && !it.name.endsWith(".part") }
-                ?.maxByOrNull { it.lastModified() }
+            .map(::File)
+            .lastOrNull {
+                it.exists() &&
+                    it.isFile &&
+                    it.length() > 0L &&
+                    it.absolutePath.startsWith(rootDir.absolutePath)
+            }
     }
 
     private fun startAttemptMonitor(
@@ -520,12 +508,14 @@ class DownloadService : Service() {
     private fun executeDownloadAttempt(
         url: String,
         option: QualityOption,
+        rootDir: File,
         jobDir: File,
         processId: String,
         telemetry: AttemptTelemetry
     ): YoutubeDLResponse {
         val request = YoutubeDLRequest(url)
             .addOption("--no-playlist")
+            .addOption("--no-mtime")
             .addOption("-f", option.selector)
             .addOption("--merge-output-format", "mp4/mkv")
             .addOption("--newline")
@@ -538,10 +528,9 @@ class DownloadService : Service() {
                 "--progress-template",
                 "download:[download] %(progress._percent_str)s of %(progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s"
             )
-            .addOption(
-                "-o",
-                File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
-            )
+            .addOption("-P", rootDir.absolutePath)
+            .addOption("-P", "temp:" + jobDir.absolutePath)
+            .addOption("-o", "%(title).180B [%(id)s].%(ext)s")
             .addOption("--print", "after_move:%(filepath)s")
 
         option.extractorArgs?.let {
