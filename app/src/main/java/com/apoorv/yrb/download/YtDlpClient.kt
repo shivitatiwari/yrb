@@ -62,7 +62,8 @@ private data class FormatCandidate(
     val language: String,
     val languagePreference: Int,
     val formatNote: String,
-    val audioChannels: Int
+    val audioChannels: Int,
+    val protocol: String
 ) {
     val hasVideo: Boolean get() = vcodec.isNotBlank() && vcodec != "none"
     val hasAudio: Boolean get() = acodec.isNotBlank() && acodec != "none"
@@ -95,9 +96,6 @@ object YtDlpClient {
     private const val CACHE_TTL_MS = 10L * 60L * 1000L
     private val cache = ConcurrentHashMap<String, CachedInspection>()
 
-    @Volatile
-    private var preferredModeKey: String = MODE_DEFAULT.key
-
     private val anonymousModes = listOf(
         MODE_DEFAULT,
         MODE_IPV4,
@@ -117,15 +115,14 @@ object YtDlpClient {
             cache.remove(normalized)
         }
 
-        val initialModes = orderedModes()
-        val firstPass = tryModes(normalized, initialModes)
+        val firstPass = tryModes(normalized, anonymousModes)
         val inspection = firstPass.getOrElse { firstError ->
             if (!shouldTryRecovery(firstError)) throw firstError
 
             // YouTube changes frequently. Refresh yt-dlp only after the fast path fails,
             // then repeat the documented anonymous client fallbacks.
             YtDlpRuntime.refreshIfDue(context, force = true)
-            tryModes(normalized, orderedModes()).getOrElse { finalError ->
+            tryModes(normalized, anonymousModes).getOrElse { finalError ->
                 throw IllegalStateException(
                     friendlyAnonymousFailure(finalError),
                     finalError
@@ -137,15 +134,6 @@ object YtDlpClient {
         return inspection
     }
 
-    private fun orderedModes(): List<InspectionMode> {
-        val preferred = anonymousModes.firstOrNull { it.key == preferredModeKey }
-            ?: MODE_DEFAULT
-        return buildList {
-            add(preferred)
-            anonymousModes.forEach { if (it.key != preferred.key) add(it) }
-        }
-    }
-
     private fun tryModes(
         url: String,
         modes: List<InspectionMode>
@@ -155,7 +143,6 @@ object YtDlpClient {
         for (mode in modes) {
             val result = runCatching { inspectOnce(url, mode) }
             result.onSuccess {
-                preferredModeKey = mode.key
                 return result
             }.onFailure {
                 lastError = it
@@ -228,14 +215,22 @@ object YtDlpClient {
                             language = format.optString("language").trim(),
                             languagePreference = format.optInt("language_preference", -1),
                             formatNote = format.optString("format_note").trim(),
-                            audioChannels = format.optInt("audio_channels", 0)
+                            audioChannels = format.optInt("audio_channels", 0),
+                            protocol = format.optString("protocol").trim()
                         )
                     )
                 }
             }
         }
 
-        val audioCandidates = candidates.filter { it.audioOnly }
+        val usableCandidates = if (mode.key == MODE_WEB_SAFARI.key) {
+            candidates.filter { it.protocol.contains("m3u8", ignoreCase = true) }
+                .ifEmpty { candidates }
+        } else {
+            candidates
+        }
+
+        val audioCandidates = usableCandidates.filter { it.audioOnly }
         val groupedAudio = audioCandidates.groupBy {
             it.language.ifBlank { DEFAULT_LANGUAGE }
         }
@@ -294,7 +289,7 @@ object YtDlpClient {
         val qualitiesByLanguage = languageIds.associateWith { languageId ->
             val chosenAudio = selectedAudioByLanguage[languageId] ?: fallbackAudio
             buildQualities(
-                candidates = candidates,
+                candidates = usableCandidates,
                 audio = chosenAudio,
                 durationSeconds = duration,
                 allowCombinedFallback = languageIds.size == 1,
