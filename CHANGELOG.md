@@ -2,6 +2,8 @@
 
 ## 1.2.0
 
+Release build verified by GitHub Actions.
+
 Release verification: unit tests, Android lint, APK build and AAB build passed in GitHub Actions.
 
 Released: 2026-09-18
