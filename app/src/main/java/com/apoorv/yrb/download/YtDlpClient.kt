@@ -524,6 +524,7 @@ object YtDlpClient {
         return message.contains("http error 403") ||
             message.contains("403 forbidden") ||
             message.contains("unable to download video data") ||
+            message.contains("downloaded file is empty") ||
             message.contains("po token") ||
             message.contains("forbidden")
     }
