@@ -1,12 +1,12 @@
 package com.apoorv.yrb.download
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.Manifest
-import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
@@ -14,10 +14,10 @@ import android.os.IBinder
 import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.FileProvider
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.apoorv.yrb.MainActivity
-import com.apoorv.yrb.data.HistoryEntry
+import com.apoorv.yrb.data.DownloadStatus
 import com.apoorv.yrb.data.HistoryStore
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -29,13 +29,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.UUID
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var activeJob: Job? = null
     private var activeProcessId: String? = null
+    private var activeHistoryId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -48,6 +49,17 @@ class DownloadService : Service() {
         if (intent?.action == ACTION_CANCEL) {
             activeProcessId?.let { YoutubeDL.getInstance().destroyProcessById(it) }
             activeJob?.cancel()
+            activeHistoryId?.let { id ->
+                HistoryStore(this).update(id) {
+                    it.copy(
+                        status = DownloadStatus.CANCELLED,
+                        stage = "Cancelled",
+                        speedBytesPerSecond = 0L,
+                        etaSeconds = null
+                    )
+                }
+                broadcastHistoryChange(id)
+            }
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -55,135 +67,277 @@ class DownloadService : Service() {
 
         if (activeJob?.isActive == true) return START_NOT_STICKY
 
-        val url = intent?.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
+        val jobId = intent?.getStringExtra(EXTRA_JOB_ID) ?: return START_NOT_STICKY
+        val url = intent.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
         val title = intent.getStringExtra(EXTRA_TITLE)?.ifBlank { "YouTube video" } ?: "YouTube video"
         val quality = intent.getIntExtra(EXTRA_QUALITY, 0)
+        val selector = intent.getStringExtra(EXTRA_SELECTOR) ?: return START_NOT_STICKY
+        val estimatedBytes = intent.getLongExtra(EXTRA_ESTIMATED_BYTES, -1L).takeIf { it > 0L }
+
         if (quality !in QualitySelector.supported) return START_NOT_STICKY
 
-        val processId = "yrb-" + UUID.randomUUID().toString()
+        val processId = "yrb-" + jobId
         activeProcessId = processId
-        startForeground(PROGRESS_NOTIFICATION_ID, progressNotification(title, 0, null))
+        activeHistoryId = jobId
+
+        HistoryStore(this).update(jobId) {
+            it.copy(
+                status = DownloadStatus.DOWNLOADING,
+                stage = "Preparing",
+                progress = 0f,
+                speedBytesPerSecond = 0L,
+                etaSeconds = null
+            )
+        }
+        broadcastHistoryChange(jobId)
+
+        startForeground(
+            PROGRESS_NOTIFICATION_ID,
+            progressNotification(jobId, title, 0, 0L, null)
+        )
 
         activeJob = scope.launch {
-            performDownload(url, title, quality, processId, startId)
+            performDownload(
+                jobId = jobId,
+                url = url,
+                title = title,
+                quality = quality,
+                selector = selector,
+                estimatedBytes = estimatedBytes,
+                processId = processId,
+                startId = startId
+            )
         }
         return START_NOT_STICKY
     }
 
     private fun performDownload(
+        jobId: String,
         url: String,
         title: String,
         quality: Int,
+        selector: String,
+        estimatedBytes: Long?,
         processId: String,
         startId: Int
     ) {
-        val historyId = UUID.randomUUID().toString()
-        val startedAt = System.currentTimeMillis()
-        val outputDir = File(
+        val rootDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "Yrb"
         )
-        outputDir.mkdirs()
+        val partialRoot = File(rootDir, ".partial")
+        val jobDir = File(partialRoot, jobId)
+        rootDir.mkdirs()
+        jobDir.mkdirs()
+
+        var completed = false
+        var maxProgress = 0f
+        var lastHistoryUpdateAt = 0L
+        var lastSampleAt = System.currentTimeMillis()
+        var lastSampleBytes = directoryBytes(jobDir)
 
         try {
+            HistoryStore(this).update(jobId) { it.copy(stage = "Refreshing extractor") }
+            broadcastHistoryChange(jobId)
+            YtDlpRuntime.ensureFresh(this)
+
+            HistoryStore(this).update(jobId) { it.copy(stage = "Downloading") }
+            broadcastHistoryChange(jobId)
+
             val request = YoutubeDLRequest(url)
                 .addOption("--no-playlist")
-                .addOption("-f", QualitySelector.selector(quality))
-                .addOption("--merge-output-format", "mp4")
+                .addOption("-f", selector)
+                .addOption("--merge-output-format", "mp4/mkv")
                 .addOption("--newline")
-                .addOption("-o", File(outputDir, "%(title).180B [%(id)s].%(ext)s").absolutePath)
+                .addOption("--concurrent-fragments", "4")
+                .addOption(
+                    "-o",
+                    File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
+                )
                 .addOption("--print", "after_move:%(filepath)s")
 
-            var lastPercent = -1
-            var lastUpdateAt = 0L
             val response = YoutubeDL.getInstance().execute(
                 request = request,
                 processId = processId,
-                callback = { progress, etaSeconds, _ ->
-                    val percent = progress.coerceIn(0f, 100f).roundToInt()
+                callback = { callbackProgress, callbackEta, line ->
                     val now = System.currentTimeMillis()
-                    if (percent != lastPercent && (now - lastUpdateAt >= 400 || percent == 100)) {
-                        lastPercent = percent
-                        lastUpdateAt = now
-                        notifySafely(
-                            PROGRESS_NOTIFICATION_ID,
-                            progressNotification(title, percent, etaSeconds)
+                    if (now - lastHistoryUpdateAt < 450L && callbackProgress < 100f) {
+                        return@execute
+                    }
+
+                    val bytes = directoryBytes(jobDir)
+                    val elapsedMs = (now - lastSampleAt).coerceAtLeast(1L)
+                    val sampledSpeed = if (bytes >= lastSampleBytes) {
+                        ((bytes - lastSampleBytes) * 1000L) / elapsedMs
+                    } else {
+                        0L
+                    }
+                    val parsedSpeed = ProgressLineParser.speedBytesPerSecond(line)
+                    val speed = parsedSpeed ?: sampledSpeed
+
+                    val computedProgress = if (estimatedBytes != null && estimatedBytes > 0L) {
+                        ((bytes.toDouble() / estimatedBytes.toDouble()) * 100.0)
+                            .toFloat()
+                            .coerceIn(0f, 99f)
+                    } else {
+                        callbackProgress.coerceIn(0f, 99f)
+                    }
+                    maxProgress = max(maxProgress, computedProgress)
+
+                    val eta = when {
+                        estimatedBytes != null && speed > 0L && bytes < estimatedBytes ->
+                            ((estimatedBytes - bytes) / speed).coerceAtLeast(0L)
+                        callbackEta >= 0L -> callbackEta
+                        else -> null
+                    }
+
+                    val stage = if (
+                        line?.contains("[Merger]", ignoreCase = true) == true ||
+                        line?.contains("Merging formats", ignoreCase = true) == true
+                    ) {
+                        "Merging"
+                    } else {
+                        "Downloading"
+                    }
+
+                    HistoryStore(this).update(jobId) {
+                        it.copy(
+                            status = DownloadStatus.DOWNLOADING,
+                            stage = stage,
+                            progress = maxProgress,
+                            speedBytesPerSecond = speed,
+                            etaSeconds = eta,
+                            downloadedBytes = bytes
                         )
                     }
+                    broadcastHistoryChange(jobId)
+                    notifySafely(
+                        PROGRESS_NOTIFICATION_ID,
+                        progressNotification(
+                            jobId,
+                            title,
+                            maxProgress.roundToInt(),
+                            speed,
+                            eta
+                        )
+                    )
+
+                    lastHistoryUpdateAt = now
+                    lastSampleAt = now
+                    lastSampleBytes = bytes
                 }
             )
+
+            HistoryStore(this).update(jobId) {
+                it.copy(
+                    stage = "Finalizing",
+                    progress = max(maxProgress, 99f),
+                    speedBytesPerSecond = 0L,
+                    etaSeconds = null
+                )
+            }
+            broadcastHistoryChange(jobId)
 
             val printedPath = response.out
                 .lineSequence()
                 .map { it.trim() }
-                .lastOrNull { it.startsWith(outputDir.absolutePath) }
+                .lastOrNull { it.startsWith(jobDir.absolutePath) }
 
-            val file = printedPath?.let(::File)?.takeIf { it.exists() }
-                ?: outputDir.listFiles()
-                    ?.filter { it.isFile && it.lastModified() >= startedAt - 2_000 }
+            val sourceFile = printedPath?.let(::File)?.takeIf { it.exists() }
+                ?: jobDir.listFiles()
+                    ?.filter { it.isFile && !it.name.endsWith(".part") }
                     ?.maxByOrNull { it.lastModified() }
 
-            if (file == null || !file.exists()) {
-                error("yt-dlp completed but the downloaded file could not be located.")
+            if (sourceFile == null || !sourceFile.exists()) {
+                error("yt-dlp finished but the completed media file could not be located.")
+            }
+
+            val finalFile = File(rootDir, sourceFile.name)
+            if (finalFile.exists()) finalFile.delete()
+
+            val moved = sourceFile.renameTo(finalFile)
+            if (!moved) {
+                sourceFile.copyTo(finalFile, overwrite = true)
+                sourceFile.delete()
+            }
+
+            if (!finalFile.exists() || finalFile.length() <= 0L) {
+                error("The completed file could not be moved into Downloads/Yrb.")
             }
 
             MediaScannerConnection.scanFile(
                 this,
-                arrayOf(file.absolutePath),
-                arrayOf(mimeFor(file)),
+                arrayOf(finalFile.absolutePath),
+                arrayOf(mimeFor(finalFile)),
                 null
             )
 
-            HistoryStore(this).add(
-                HistoryEntry(
-                    id = historyId,
-                    title = title,
-                    url = url,
-                    quality = quality,
-                    path = file.absolutePath,
-                    status = "completed",
-                    timestamp = System.currentTimeMillis()
+            HistoryStore(this).update(jobId) {
+                it.copy(
+                    filePath = finalFile.absolutePath,
+                    status = DownloadStatus.COMPLETED,
+                    stage = "Completed",
+                    progress = 100f,
+                    speedBytesPerSecond = 0L,
+                    etaSeconds = 0L,
+                    downloadedBytes = finalFile.length(),
+                    error = null
                 )
-            )
-            sendBroadcast(Intent(ACTION_HISTORY_CHANGED).setPackage(packageName))
+            }
+            broadcastHistoryChange(jobId)
+            completed = true
 
             stopForeground(STOP_FOREGROUND_REMOVE)
             notifySafely(
                 COMPLETE_NOTIFICATION_ID,
-                completeNotification(title, quality, file)
+                completeNotification(title, quality, finalFile)
             )
         } catch (t: Throwable) {
-            HistoryStore(this).add(
-                HistoryEntry(
-                    id = historyId,
-                    title = title,
-                    url = url,
-                    quality = quality,
-                    path = null,
-                    status = if (t is CancellationException) "cancelled" else "failed",
-                    timestamp = System.currentTimeMillis(),
-                    error = t.message
+            val cancelled = t is CancellationException
+            val humanError = if (cancelled) null else ProgressLineParser.humanError(t.message)
+
+            HistoryStore(this).update(jobId) {
+                it.copy(
+                    status = if (cancelled) DownloadStatus.CANCELLED else DownloadStatus.FAILED,
+                    stage = if (cancelled) "Cancelled" else "Failed",
+                    speedBytesPerSecond = 0L,
+                    etaSeconds = null,
+                    error = humanError
                 )
-            )
-            sendBroadcast(Intent(ACTION_HISTORY_CHANGED).setPackage(packageName))
+            }
+            broadcastHistoryChange(jobId)
             stopForeground(STOP_FOREGROUND_REMOVE)
 
-            if (t !is CancellationException) {
+            if (!cancelled) {
                 notifySafely(
                     FAILED_NOTIFICATION_ID,
-                    failedNotification(title, t.message ?: "Download failed")
+                    failedNotification(title, humanError ?: "Download failed")
                 )
             }
         } finally {
+            if (completed || HistoryStore(this).find(jobId)?.status != DownloadStatus.DOWNLOADING) {
+                runCatching { jobDir.deleteRecursively() }
+                if (partialRoot.listFiles().isNullOrEmpty()) runCatching { partialRoot.delete() }
+            }
             activeProcessId = null
+            activeHistoryId = null
             activeJob = null
             stopSelf(startId)
         }
     }
 
+    private fun directoryBytes(dir: File): Long =
+        runCatching {
+            dir.walkTopDown()
+                .filter { it.isFile }
+                .sumOf { it.length() }
+        }.getOrDefault(0L)
+
     private fun progressNotification(
+        jobId: String,
         title: String,
         progress: Int,
+        speed: Long,
         etaSeconds: Long?
     ): android.app.Notification {
         val cancelIntent = Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL)
@@ -193,19 +347,39 @@ class DownloadService : Service() {
             cancelIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val subtitle = if (etaSeconds != null && etaSeconds >= 0) {
-            progress.toString() + "% • about " + etaSeconds + "s remaining"
-        } else {
-            progress.toString() + "%"
+        val openIntent = Intent(this, MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_OPEN_JOB_ID, jobId)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val openPending = PendingIntent.getActivity(
+            this,
+            11,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val details = buildString {
+            append(progress)
+            append("%")
+            if (speed > 0L) {
+                append(" • ")
+                append(FileSizeFormatter.format(speed))
+                append("/s")
+            }
+            if (etaSeconds != null && etaSeconds >= 0L) {
+                append(" • ")
+                append(formatEta(etaSeconds))
+                append(" left")
+            }
         }
 
         return NotificationCompat.Builder(this, CHANNEL_DOWNLOADS)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title)
-            .setContentText(subtitle)
+            .setContentText(details)
+            .setContentIntent(openPending)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .setProgress(100, progress, false)
+            .setProgress(100, progress.coerceIn(0, 100), false)
             .addAction(0, "Cancel", cancelPending)
             .build()
     }
@@ -227,6 +401,7 @@ class DownloadService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val qualityLabel = if (quality == 2160) "4K" else quality.toString() + "p"
+
         return NotificationCompat.Builder(this, CHANNEL_RESULTS)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Download complete")
@@ -243,6 +418,7 @@ class DownloadService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
         return NotificationCompat.Builder(this, CHANNEL_RESULTS)
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle("Download failed")
@@ -266,14 +442,32 @@ class DownloadService : Service() {
         try {
             NotificationManagerCompat.from(this).notify(id, notification)
         } catch (_: SecurityException) {
-            // The user or system can revoke notification access between check and post.
+            // Notification access can be revoked between the permission check and posting.
         }
     }
 
-    private fun mimeFor(file: File): String {
-        return MimeTypeMap.getSingleton()
+    private fun mimeFor(file: File): String =
+        MimeTypeMap.getSingleton()
             .getMimeTypeFromExtension(file.extension.lowercase())
             ?: "video/*"
+
+    private fun formatEta(seconds: Long): String {
+        val safe = seconds.coerceAtLeast(0L)
+        val minutes = safe / 60L
+        val remainingSeconds = safe % 60L
+        return if (minutes > 0L) {
+            minutes.toString() + "m " + remainingSeconds.toString() + "s"
+        } else {
+            remainingSeconds.toString() + "s"
+        }
+    }
+
+    private fun broadcastHistoryChange(jobId: String) {
+        sendBroadcast(
+            Intent(ACTION_HISTORY_CHANGED)
+                .setPackage(packageName)
+                .putExtra(EXTRA_CHANGED_JOB_ID, jobId)
+        )
     }
 
     private fun createChannels() {
@@ -310,10 +504,14 @@ class DownloadService : Service() {
 
     companion object {
         const val ACTION_HISTORY_CHANGED = "com.apoorv.yrb.HISTORY_CHANGED"
+        const val EXTRA_CHANGED_JOB_ID = "changed_job_id"
         private const val ACTION_CANCEL = "com.apoorv.yrb.CANCEL"
+        private const val EXTRA_JOB_ID = "job_id"
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_QUALITY = "quality"
+        private const val EXTRA_SELECTOR = "selector"
+        private const val EXTRA_ESTIMATED_BYTES = "estimated_bytes"
         private const val CHANNEL_DOWNLOADS = "downloads"
         private const val CHANNEL_RESULTS = "download_results"
         private const val PROGRESS_NOTIFICATION_ID = 1001
@@ -322,14 +520,17 @@ class DownloadService : Service() {
 
         fun createIntent(
             context: android.content.Context,
+            jobId: String,
             url: String,
             title: String,
-            quality: Int
-        ): Intent {
-            return Intent(context, DownloadService::class.java)
+            quality: QualityOption
+        ): Intent =
+            Intent(context, DownloadService::class.java)
+                .putExtra(EXTRA_JOB_ID, jobId)
                 .putExtra(EXTRA_URL, url)
                 .putExtra(EXTRA_TITLE, title)
-                .putExtra(EXTRA_QUALITY, quality)
-        }
+                .putExtra(EXTRA_QUALITY, quality.height)
+                .putExtra(EXTRA_SELECTOR, quality.selector)
+                .putExtra(EXTRA_ESTIMATED_BYTES, quality.estimatedBytes ?: -1L)
     }
 }
