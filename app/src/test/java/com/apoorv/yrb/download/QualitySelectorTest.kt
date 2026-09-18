@@ -12,6 +12,14 @@ class QualitySelectorTest {
     }
 
     @Test
+    fun anonymousFallbackOrderIsStable() {
+        assertEquals(
+            listOf("default", "ipv4", "web_safari", "android_vr", "web_embedded"),
+            YtDlpClient.anonymousFallbackNamesForTest()
+        )
+    }
+
+    @Test
     fun fileSizeFormatterProducesHumanReadableValues() {
         assertEquals("1.0 MB", FileSizeFormatter.format(1024L * 1024L))
         assertEquals("0 B", FileSizeFormatter.format(0L))
