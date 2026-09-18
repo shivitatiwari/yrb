@@ -1,10 +1,21 @@
 # Changelog
 
+## 1.3.0
+
+- Add documented anonymous YouTube fallback ladder.
+- Keep normal/default extraction first for every new URL.
+- Retry the default path with IPv4.
+- Add `web_safari` fallback and prefer its HLS formats.
+- Add `android_vr` fallback.
+- Add `web_embedded` fallback for embeddable videos.
+- Refresh yt-dlp and retry the ladder once after recoverable anonymous extraction failures.
+- Carry the successful extractor arguments into the actual download request.
+- Keep normal videos on the fast path with no extra fallback requests.
+- Add a unit test locking fallback order.
+
 ## 1.2.0
 
 Release build verified by GitHub Actions.
-
-Release verification: unit tests, Android lint, APK build and AAB build passed in GitHub Actions.
 
 Released: 2026-09-18
 
@@ -20,24 +31,3 @@ Released: 2026-09-18
 - Show only one loader while inspecting.
 - Show 0 B rather than "Size unavailable" before bytes begin writing.
 - Add "Made by Apoorv Sandilya" plus contact@apoorv.sbs, X @sandilyapoorv and Instagram apoorvsandilya.
-- Preserve the v1.1 partial-download, cancellation, notification and process-recovery behavior.
-
-## 1.1.0
-
-- Refresh yt-dlp on-device from the nightly channel when the runtime is stale.
-- Filter out DRM and YouTube/SABR format entries that do not expose a downloadable URL.
-- Show available resolution file-size estimates before download.
-- Start a download directly from the selected quality.
-- Add a dedicated live Downloading screen.
-- Show progress, current speed, ETA and bytes written.
-- Show active downloads in History.
-- Keep partial streams under Downloads/Yrb/.partial/<job-id>.
-- Use yt-dlp fragment concurrency where supported.
-- Merge separate video/audio streams locally with FFmpeg.
-- Move only the finished file into Downloads/Yrb.
-- Preserve cancellation state correctly.
-- Mark interrupted jobs accurately after process restarts and clean abandoned partial files.
-- Replace raw yt-dlp warning dumps with concise failure messages.
-- Prevent duplicate foreground jobs.
-- Refresh the Material 3 UI and dark/light theme.
-- Add CI tests for quality ordering, file-size formatting, speed parsing and error sanitization.
