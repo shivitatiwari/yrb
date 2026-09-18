@@ -4,7 +4,14 @@ import android.content.Context
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONObject
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToLong
+
+data class AudioLanguageOption(
+    val id: String,
+    val label: String
+)
 
 data class QualityOption(
     val height: Int,
@@ -19,8 +26,15 @@ data class QualityOption(
 data class VideoInspection(
     val title: String,
     val durationSeconds: Long?,
-    val qualities: List<QualityOption>
-)
+    val audioLanguages: List<AudioLanguageOption>,
+    val defaultLanguageId: String,
+    val qualitiesByLanguage: Map<String, List<QualityOption>>
+) {
+    fun qualities(languageId: String): List<QualityOption> =
+        qualitiesByLanguage[languageId]
+            ?: qualitiesByLanguage[defaultLanguageId]
+            ?: emptyList()
+}
 
 object QualitySelector {
     val supported = listOf(2160, 1440, 1080, 720, 480, 360)
@@ -32,21 +46,70 @@ private data class FormatCandidate(
     val ext: String,
     val vcodec: String,
     val acodec: String,
-    val bitrate: Double,
+    val tbr: Double,
+    val vbr: Double,
+    val abr: Double,
     val size: Long?,
-    val exactSize: Boolean
+    val exactSize: Boolean,
+    val language: String,
+    val languagePreference: Int,
+    val formatNote: String,
+    val audioChannels: Int
 ) {
     val hasVideo: Boolean get() = vcodec.isNotBlank() && vcodec != "none"
     val hasAudio: Boolean get() = acodec.isNotBlank() && acodec != "none"
     val videoOnly: Boolean get() = hasVideo && !hasAudio
     val audioOnly: Boolean get() = !hasVideo && hasAudio
     val combined: Boolean get() = hasVideo && hasAudio
+
+    fun estimatedSize(durationSeconds: Long?): Pair<Long?, Boolean> {
+        size?.let { return it to !exactSize }
+        val duration = durationSeconds ?: return null to true
+        val kbps = when {
+            videoOnly -> vbr.takeIf { it > 0.0 } ?: tbr.takeIf { it > 0.0 }
+            audioOnly -> abr.takeIf { it > 0.0 } ?: tbr.takeIf { it > 0.0 }
+            else -> tbr.takeIf { it > 0.0 }
+        } ?: return null to true
+
+        val estimate = ((kbps * 1000.0 / 8.0) * duration.toDouble())
+            .roundToLong()
+            .coerceAtLeast(1L)
+        return estimate to true
+    }
 }
 
-object YtDlpClient {
-    fun inspect(context: Context, url: String): VideoInspection {
-        YtDlpRuntime.ensureFresh(context)
+private data class CachedInspection(
+    val createdAt: Long,
+    val inspection: VideoInspection
+)
 
+object YtDlpClient {
+    private const val CACHE_TTL_MS = 10L * 60L * 1000L
+    private val cache = ConcurrentHashMap<String, CachedInspection>()
+
+    fun inspect(context: Context, url: String): VideoInspection {
+        val normalized = url.trim()
+        val now = System.currentTimeMillis()
+
+        cache[normalized]?.let { cached ->
+            if (now - cached.createdAt <= CACHE_TTL_MS) {
+                return cached.inspection
+            }
+            cache.remove(normalized)
+        }
+
+        val firstAttempt = runCatching { inspectOnce(normalized) }
+        val inspection = firstAttempt.getOrElse { firstError ->
+            val refreshed = YtDlpRuntime.refreshIfDue(context, force = true)
+            if (!refreshed) throw firstError
+            inspectOnce(normalized)
+        }
+
+        cache[normalized] = CachedInspection(now, inspection)
+        return inspection
+    }
+
+    private fun inspectOnce(url: String): VideoInspection {
         val request = YoutubeDLRequest(url)
             .addOption("--dump-single-json")
             .addOption("--skip-download")
@@ -56,6 +119,10 @@ object YtDlpClient {
 
         val response = YoutubeDL.getInstance().execute(request)
         val root = JSONObject(response.out.trim())
+        val duration = root.optDouble("duration", -1.0)
+            .takeIf { it > 0.0 }
+            ?.roundToLong()
+
         val formats = root.optJSONArray("formats")
         val candidates = buildList {
             if (formats != null) {
@@ -65,93 +132,204 @@ object YtDlpClient {
                     if (id.isBlank()) continue
                     if (format.optBoolean("has_drm", false)) continue
 
-                    val url = format.optString("url").trim()
+                    val mediaUrl = format.optString("url").trim()
                     val manifestUrl = format.optString("manifest_url").trim()
-                    if (url.isBlank() && manifestUrl.isBlank()) continue
+                    if (mediaUrl.isBlank() && manifestUrl.isBlank()) continue
 
                     val rawVideoCodec = format.optString("vcodec")
                     if (rawVideoCodec.equals("images", ignoreCase = true)) continue
 
-                    val height = format.optInt("height", -1).takeIf { it > 0 }
-                    val filesize = format.optLong("filesize", -1L).takeIf { it > 0 }
-                    val approx = format.optLong("filesize_approx", -1L).takeIf { it > 0 }
+                    val filesize = format.optLong("filesize", -1L).takeIf { it > 0L }
+                    val approx = format.optLong("filesize_approx", -1L).takeIf { it > 0L }
+
                     add(
                         FormatCandidate(
                             id = id,
-                            height = height,
+                            height = format.optInt("height", -1).takeIf { it > 0 },
                             ext = format.optString("ext"),
                             vcodec = rawVideoCodec,
                             acodec = format.optString("acodec"),
-                            bitrate = format.optDouble("tbr", format.optDouble("abr", 0.0)),
+                            tbr = format.optDouble("tbr", 0.0),
+                            vbr = format.optDouble("vbr", 0.0),
+                            abr = format.optDouble("abr", 0.0),
                             size = filesize ?: approx,
-                            exactSize = filesize != null
+                            exactSize = filesize != null,
+                            language = format.optString("language").trim(),
+                            languagePreference = format.optInt("language_preference", -1),
+                            formatNote = format.optString("format_note").trim(),
+                            audioChannels = format.optInt("audio_channels", 0)
                         )
                     )
                 }
             }
         }
 
-        val bestAudio = candidates
-            .filter { it.audioOnly }
-            .maxWithOrNull(
+        val audioCandidates = candidates.filter { it.audioOnly }
+        val groupedAudio = audioCandidates.groupBy {
+            it.language.ifBlank { DEFAULT_LANGUAGE }
+        }
+
+        val selectedAudioByLanguage = groupedAudio.mapValues { (_, options) ->
+            options.maxWith(
                 compareBy<FormatCandidate>(
+                    { if (it.formatNote.contains("original", ignoreCase = true)) 1 else 0 },
+                    { it.languagePreference },
+                    { it.audioChannels },
                     { if (it.ext == "m4a") 1 else 0 },
-                    { it.bitrate }
+                    { it.abr.takeIf { value -> value > 0.0 } ?: it.tbr }
+                )
+            )
+        }
+
+        val fallbackLanguage = DEFAULT_LANGUAGE
+        val fallbackAudio = selectedAudioByLanguage[fallbackLanguage]
+            ?: audioCandidates.maxWithOrNull(
+                compareBy<FormatCandidate>(
+                    { if (it.formatNote.contains("original", ignoreCase = true)) 1 else 0 },
+                    { it.languagePreference },
+                    { it.audioChannels },
+                    { if (it.ext == "m4a") 1 else 0 },
+                    { it.abr.takeIf { value -> value > 0.0 } ?: it.tbr }
                 )
             )
 
-        val qualityOptions = QualitySelector.supported.mapNotNull { height ->
+        val languageEntries = if (selectedAudioByLanguage.isNotEmpty()) {
+            selectedAudioByLanguage.entries.sortedWith(
+                compareByDescending<Map.Entry<String, FormatCandidate>> {
+                    it.value.formatNote.contains("original", ignoreCase = true)
+                }.thenByDescending {
+                    it.value.languagePreference
+                }.thenBy {
+                    languageLabel(it.key, it.value.formatNote)
+                }
+            )
+        } else {
+            emptyList()
+        }
+
+        val defaultLanguageId = languageEntries.firstOrNull()?.key ?: fallbackLanguage
+        val languages = if (languageEntries.isEmpty()) {
+            listOf(AudioLanguageOption(fallbackLanguage, "Default audio"))
+        } else {
+            languageEntries.map { (languageId, candidate) ->
+                AudioLanguageOption(
+                    id = languageId,
+                    label = languageLabel(languageId, candidate.formatNote)
+                )
+            }
+        }
+
+        val languageIds = languages.map { it.id }
+        val qualitiesByLanguage = languageIds.associateWith { languageId ->
+            val chosenAudio = selectedAudioByLanguage[languageId] ?: fallbackAudio
+            buildQualities(
+                candidates = candidates,
+                audio = chosenAudio,
+                durationSeconds = duration,
+                allowCombinedFallback = languageIds.size == 1
+            )
+        }.filterValues { it.isNotEmpty() }
+
+        if (qualitiesByLanguage.isEmpty()) {
+            error("No supported downloadable video resolutions were reported for this video.")
+        }
+
+        val realDefault = if (qualitiesByLanguage.containsKey(defaultLanguageId)) {
+            defaultLanguageId
+        } else {
+            qualitiesByLanguage.keys.first()
+        }
+
+        val visibleLanguages = languages.filter { qualitiesByLanguage.containsKey(it.id) }
+
+        return VideoInspection(
+            title = root.optString("title").ifBlank { "YouTube video" },
+            durationSeconds = duration,
+            audioLanguages = visibleLanguages.ifEmpty {
+                listOf(AudioLanguageOption(realDefault, "Default audio"))
+            },
+            defaultLanguageId = realDefault,
+            qualitiesByLanguage = qualitiesByLanguage
+        )
+    }
+
+    private fun buildQualities(
+        candidates: List<FormatCandidate>,
+        audio: FormatCandidate?,
+        durationSeconds: Long?,
+        allowCombinedFallback: Boolean
+    ): List<QualityOption> {
+        return QualitySelector.supported.mapNotNull { height ->
             val exact = candidates.filter { it.height == height }
+
             val videoOnly = exact
                 .filter { it.videoOnly }
                 .maxWithOrNull(
                     compareBy<FormatCandidate>(
                         { if (it.ext == "mp4" && it.vcodec.startsWith("avc1")) 3 else if (it.ext == "mp4") 2 else 1 },
-                        { it.bitrate }
+                        { it.vbr.takeIf { value -> value > 0.0 } ?: it.tbr }
                     )
                 )
 
-            if (videoOnly != null && bestAudio != null) {
-                val total = if (videoOnly.size != null && bestAudio.size != null) {
-                    videoOnly.size + bestAudio.size
+            if (videoOnly != null && audio != null) {
+                val (videoBytes, videoApprox) = videoOnly.estimatedSize(durationSeconds)
+                val (audioBytes, audioApprox) = audio.estimatedSize(durationSeconds)
+                val total = if (videoBytes != null && audioBytes != null) {
+                    videoBytes + audioBytes
                 } else null
+
                 QualityOption(
                     height = height,
-                    selector = videoOnly.id + "+" + bestAudio.id,
+                    selector = videoOnly.id + "+" + audio.id,
                     estimatedBytes = total,
-                    approximate = !videoOnly.exactSize || !bestAudio.exactSize
+                    approximate = videoApprox || audioApprox
                 )
-            } else {
+            } else if (allowCombinedFallback) {
                 val combined = exact
                     .filter { it.combined }
                     .maxWithOrNull(
                         compareBy<FormatCandidate>(
                             { if (it.ext == "mp4") 2 else 1 },
-                            { it.bitrate }
+                            { it.tbr }
                         )
                     ) ?: return@mapNotNull null
 
+                val (bytes, approximate) = combined.estimatedSize(durationSeconds)
                 QualityOption(
                     height = height,
                     selector = combined.id,
-                    estimatedBytes = combined.size,
-                    approximate = !combined.exactSize
+                    estimatedBytes = bytes,
+                    approximate = approximate
                 )
+            } else {
+                null
+            }
+        }
+    }
+
+    private fun languageLabel(languageId: String, formatNote: String): String {
+        if (languageId == DEFAULT_LANGUAGE) {
+            return if (formatNote.contains("original", ignoreCase = true)) {
+                "Original audio"
+            } else {
+                "Default audio"
             }
         }
 
-        if (qualityOptions.isEmpty()) {
-            error("No supported video resolutions are currently downloadable for this video.")
-        }
+        val locale = Locale.forLanguageTag(languageId.replace("_", "-"))
+        val display = locale.getDisplayLanguage(Locale.getDefault())
+            .takeIf { it.isNotBlank() && it != languageId }
+            ?.replaceFirstChar { it.titlecase(Locale.getDefault()) }
+            ?: languageId
 
-        return VideoInspection(
-            title = root.optString("title").ifBlank { "YouTube video" },
-            durationSeconds = root.optDouble("duration", -1.0)
-                .takeIf { it > 0 }
-                ?.roundToLong(),
-            qualities = qualityOptions
-        )
+        return if (formatNote.contains("original", ignoreCase = true)) {
+            display + " (Original)"
+        } else {
+            display
+        }
     }
+
+    private const val DEFAULT_LANGUAGE = "default"
 }
 
 object FileSizeFormatter {
@@ -167,7 +345,7 @@ object FileSizeFormatter {
         return if (index == 0) {
             bytes.toString() + " " + units[index]
         } else {
-            String.format("%.1f %s", value, units[index])
+            String.format(Locale.getDefault(), "%.1f %s", value, units[index])
         }
     }
 }
