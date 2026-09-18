@@ -1,50 +1,83 @@
 # Yrb
 
-Yrb is a native Android YouTube downloader. yt-dlp and FFmpeg run entirely on the phone.
+Yrb is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy video through a server.
 
-## v1.5.0
+## v1.7.0
 
-Yrb can now use the user's own YouTube browser session without requiring an external cookies.txt export.
+v1.7.0 simplifies Yrb around one fast authenticated yt-dlp path instead of stacking normal-path client fallbacks.
 
-### Connect YouTube
+### Fast metadata path
 
-1. Tap **Sign in to YouTube** inside Yrb.
-2. Yrb opens a private in-app browser pointed at YouTube.
-3. Sign in on Google's/YouTube's own page.
-4. When YouTube shows the account as signed in, tap **Use this session**.
-5. Yrb converts the local WebView cookie jar into a Netscape-format cookies file stored under Android private no-backup storage.
-6. Metadata inspection and media downloads automatically pass that private cookie file to yt-dlp.
-7. Yrb also reuses the same WebView user-agent because yt-dlp notes that authenticated/session-sensitive downloads can depend on matching cookies and request headers.
+When a YouTube session is connected, Yrb performs one metadata request with:
 
-Yrb never receives the user's Google password. No JavaScript bridge is injected into the login page, and the saved session is not uploaded to a backend, committed to GitHub, or included in release assets.
+- `--dump-single-json`
+- one retry
+- 5 second socket timeout
+- the saved browser cookies
+- the matching WebView User-Agent
+- `youtube:player_client=default,web_embedded`
 
-Manual **Import cookies.txt** remains available as a fallback.
+The authenticated client selection follows the current yt-dlp workaround for the logged-in `tv_downgraded` "page needs to be reloaded" failure.
 
-Google can restrict embedded WebView sign-in on some accounts/devices. If that happens, the manual cookie-file import path remains the reliable fallback because yt-dlp's current YouTube documentation says OAuth login no longer works and cookies are required.
+Successful inspections are cached in memory for 10 minutes. The cache key includes the current session file timestamp, so refreshing the browser session invalidates stale metadata automatically.
 
-## Existing features
+Yrb also refreshes yt-dlp in the background when the app starts rather than putting updater latency in front of the metadata request.
+
+Network and YouTube response time are outside the app's control, so a hard 2 second guarantee is not possible, but the normal path now performs only one extractor request instead of sequential client probing.
+
+### Browser session
+
+Yrb's in-app YouTube sign-in still keeps the user's password inside Google's/YouTube's page.
+
+The browser session export now reads Android WebView's cookie database and preserves the cookie:
+
+- domain
+- path
+- secure flag
+- expiry
+- name
+- value
+
+Only YouTube/Google/GoogleVideo domains are exported. The resulting Netscape cookie file stays in Android private no-backup storage.
+
+Existing v1.5/v1.6 browser sessions are re-exported automatically from the WebView database on startup when possible.
+
+If the database snapshot is unavailable, Yrb falls back to Android's CookieManager.
+
+### Download pipeline
+
+yt-dlp now owns both the temporary and final paths:
+
+`Downloads/Yrb/.partial/<job-id>/` — temporary fragments
+
+`Downloads/Yrb/` — finished file
+
+For separate video/audio streams, yt-dlp downloads the streams locally and FFmpeg merges them on-device. Yrb monitors the temporary directory every 500 ms for live bytes/speed/progress and uses yt-dlp's own `after_move` path as the finished file.
+
+Zero-byte output and yt-dlp's "downloaded file is empty" error are treated as recoverable failures instead of valid completed downloads.
+
+### Existing features
 
 - 360p / 480p / 720p / 1080p / 1440p / 4K availability detection
-- file-size estimates
+- exact or estimated file sizes
 - multi-audio language selection
-- real local progress based on yt-dlp output + bytes written
-- speed and ETA
-- live History
-- foreground notifications and cancellation
-- automatic recovery across alternate playback routes after recoverable 403s
-- on-device FFmpeg merging
-- completed files in `Downloads/Yrb`
+- live local progress, speed, ETA and written bytes
+- foreground download notification and cancellation
+- active/completed History
+- completed-file open action
+- creator/contact information for Apoorv Sandilya
 
 ## Android
 
 - Application ID: `com.apoorv.yrb`
-- versionCode: 6
-- versionName: 1.5.0
+- versionCode: 8
+- versionName: 1.7.0
 - minSdk: 30
 - targetSdk: 36
 - compileSdk: 36
 - Kotlin + Jetpack Compose + Material 3
 - JDK 17 / Gradle 8.13 / AGP 8.13.2
+- youtubedl-android 0.18.1
 
 ## Creator
 
