@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Environment
 import android.util.Log
 import com.apoorv.yrb.data.HistoryStore
+import com.apoorv.yrb.download.YtDlpRuntime
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import java.io.File
@@ -18,6 +19,10 @@ class YrbApplication : Application() {
         try {
             YoutubeDL.getInstance().init(this)
             FFmpeg.getInstance().init(this)
+
+            Thread {
+                YtDlpRuntime.refreshIfDue(this)
+            }.start()
         } catch (t: Throwable) {
             Log.e("YrbApplication", "Failed to initialize yt-dlp runtime", t)
         }
