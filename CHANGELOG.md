@@ -2,6 +2,8 @@
 
 ## 1.2.0
 
+Released: 2026-09-18
+
 - Keep yt-dlp update checks off the normal metadata-fetch path.
 - Retry metadata extraction with a nightly yt-dlp refresh only when extraction fails.
 - Cache recent inspections for 10 minutes.
