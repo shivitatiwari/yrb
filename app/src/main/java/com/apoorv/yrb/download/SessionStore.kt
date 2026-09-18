@@ -110,9 +110,17 @@ class SessionStore(private val context: Context) {
 
     fun webViewSessionLooksAuthenticated(cookieManager: CookieManager): Boolean =
         runCatching {
-            SessionCookieValidator.looksAuthenticated(
-                netscapeFromWebView(cookieManager)
-            )
+            cookieManager.flush()
+            val databaseSnapshot = readWebViewCookieDatabase().getOrNull()
+            val netscape = if (
+                databaseSnapshot != null &&
+                SessionCookieValidator.looksAuthenticated(databaseSnapshot)
+            ) {
+                databaseSnapshot
+            } else {
+                buildCookieManagerFallback(cookieManager)
+            }
+            SessionCookieValidator.looksAuthenticated(netscape)
         }.getOrDefault(false)
 
     fun captureFromWebView(
@@ -121,8 +129,15 @@ class SessionStore(private val context: Context) {
     ): Result<SessionStatus> = runCatching {
         cookieManager.flush()
 
-        val netscape = readWebViewCookieDatabase()
-            .getOrElse { buildCookieManagerFallback(cookieManager) }
+        val databaseSnapshot = readWebViewCookieDatabase().getOrNull()
+        val netscape = if (
+            databaseSnapshot != null &&
+            SessionCookieValidator.looksAuthenticated(databaseSnapshot)
+        ) {
+            databaseSnapshot
+        } else {
+            buildCookieManagerFallback(cookieManager)
+        }
 
         SessionCookieValidator.validateAndCount(netscape)
         check(SessionCookieValidator.looksAuthenticated(netscape)) {
