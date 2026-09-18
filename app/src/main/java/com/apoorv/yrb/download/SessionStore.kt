@@ -2,6 +2,7 @@ package com.apoorv.yrb.download
 
 import android.content.Context
 import android.net.Uri
+import android.webkit.CookieManager
 import java.io.File
 
 data class SessionStatus(
@@ -10,6 +11,16 @@ data class SessionStatus(
 )
 
 object SessionCookieValidator {
+    private val authCookieNames = setOf(
+        "SAPISID",
+        "SID",
+        "LOGIN_INFO",
+        "__Secure-1PSID",
+        "__Secure-3PSID",
+        "__Secure-1PAPISID",
+        "__Secure-3PAPISID"
+    )
+
     fun validateAndCount(text: String): Int {
         val lines = text.lineSequence()
             .map { it.trimEnd() }
@@ -39,28 +50,43 @@ object SessionCookieValidator {
 
         return cookieRows.size
     }
+
+    fun looksAuthenticated(text: String): Boolean {
+        return text.lineSequence()
+            .filter { it.isNotBlank() && !it.startsWith("#") }
+            .mapNotNull { row ->
+                val columns = row.split('\t')
+                columns.getOrNull(5)
+            }
+            .any { it in authCookieNames }
+    }
 }
 
 class SessionStore(private val context: Context) {
     private val cookieFile = File(context.noBackupFilesDir, COOKIE_FILE_NAME)
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun status(): SessionStatus {
         if (!cookieFile.exists() || cookieFile.length() <= 0L) {
             return SessionStatus(connected = false)
         }
 
+        val text = runCatching { cookieFile.readText() }.getOrDefault("")
         val count = runCatching {
-            SessionCookieValidator.validateAndCount(cookieFile.readText())
+            SessionCookieValidator.validateAndCount(text)
         }.getOrDefault(0)
 
         return SessionStatus(
-            connected = count > 0,
+            connected = count > 0 && SessionCookieValidator.looksAuthenticated(text),
             cookieCount = count
         )
     }
 
     fun cookieFileOrNull(): File? =
         cookieFile.takeIf { status().connected }
+
+    fun userAgentOrNull(): String? =
+        prefs.getString(KEY_USER_AGENT, null)?.takeIf { it.isNotBlank() }
 
     fun importFrom(uri: Uri): Result<SessionStatus> = runCatching {
         val text = context.contentResolver.openInputStream(uri)
@@ -69,20 +95,87 @@ class SessionStore(private val context: Context) {
             ?: error("Could not read the selected file.")
 
         SessionCookieValidator.validateAndCount(text)
+        check(SessionCookieValidator.looksAuthenticated(text)) {
+            "The file contains YouTube cookies, but no signed-in session was detected."
+        }
 
         cookieFile.parentFile?.mkdirs()
         cookieFile.writeText(text)
 
         status().also {
-            check(it.connected) { "No usable cookies were found." }
+            check(it.connected) { "No usable signed-in YouTube session was found." }
+        }
+    }
+
+    fun captureFromWebView(
+        cookieManager: CookieManager,
+        userAgent: String
+    ): Result<SessionStatus> = runCatching {
+        cookieManager.flush()
+
+        val sources = listOf(
+            ".youtube.com" to "https://www.youtube.com/",
+            ".google.com" to "https://accounts.google.com/"
+        )
+
+        val seen = linkedSetOf<String>()
+        val rows = mutableListOf<String>()
+
+        for ((domain, url) in sources) {
+            val raw = cookieManager.getCookie(url).orEmpty()
+            raw.split(';').forEach { part ->
+                val trimmed = part.trim()
+                val eq = trimmed.indexOf('=')
+                if (eq <= 0) return@forEach
+
+                val name = trimmed.substring(0, eq).trim()
+                val value = trimmed.substring(eq + 1)
+                if (name.isBlank()) return@forEach
+
+                val dedupe = domain + "|" + name
+                if (!seen.add(dedupe)) return@forEach
+
+                rows += listOf(
+                    domain,
+                    "TRUE",
+                    "/",
+                    "TRUE",
+                    "0",
+                    name,
+                    value
+                ).joinToString("\t")
+            }
+        }
+
+        val netscape = buildString {
+            appendLine("# Netscape HTTP Cookie File")
+            appendLine("# Generated locally by Yrb from the user's in-app YouTube session.")
+            appendLine("# This file never leaves the device.")
+            rows.forEach { appendLine(it) }
+        }
+
+        SessionCookieValidator.validateAndCount(netscape)
+        check(SessionCookieValidator.looksAuthenticated(netscape)) {
+            "A signed-in YouTube session was not detected yet. Finish signing in, then tap Use this session."
+        }
+
+        cookieFile.parentFile?.mkdirs()
+        cookieFile.writeText(netscape)
+        prefs.edit().putString(KEY_USER_AGENT, userAgent).apply()
+
+        status().also {
+            check(it.connected) { "Could not save the signed-in YouTube session." }
         }
     }
 
     fun clear() {
         runCatching { cookieFile.delete() }
+        prefs.edit().remove(KEY_USER_AGENT).apply()
     }
 
     companion object {
         private const val COOKIE_FILE_NAME = "youtube-cookies.txt"
+        private const val PREFS_NAME = "youtube_session"
+        private const val KEY_USER_AGENT = "webview_user_agent"
     }
 }
