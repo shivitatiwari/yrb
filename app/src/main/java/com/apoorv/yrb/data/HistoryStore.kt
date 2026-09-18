@@ -5,35 +5,95 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-data class HistoryEntry(
+data class DownloadRecord(
     val id: String,
     val title: String,
     val url: String,
     val quality: Int,
-    val path: String?,
+    val filePath: String? = null,
     val status: String,
+    val stage: String = status,
+    val progress: Float = 0f,
+    val speedBytesPerSecond: Long = 0L,
+    val etaSeconds: Long? = null,
+    val estimatedBytes: Long? = null,
+    val downloadedBytes: Long = 0L,
     val timestamp: Long,
     val error: String? = null
 )
 
+object DownloadStatus {
+    const val QUEUED = "queued"
+    const val DOWNLOADING = "downloading"
+    const val COMPLETED = "completed"
+    const val FAILED = "failed"
+    const val CANCELLED = "cancelled"
+
+    fun isActive(value: String): Boolean =
+        value == QUEUED || value == DOWNLOADING
+}
+
 class HistoryStore(context: Context) {
     private val file = File(context.filesDir, "download_history.json")
 
-    fun readAll(): List<HistoryEntry> = synchronized(FILE_LOCK) {
+    fun readAll(): List<DownloadRecord> = synchronized(FILE_LOCK) {
+        readUnlocked()
+    }
+
+    fun find(id: String): DownloadRecord? = synchronized(FILE_LOCK) {
+        readUnlocked().firstOrNull { it.id == id }
+    }
+
+    fun upsert(entry: DownloadRecord) = synchronized(FILE_LOCK) {
+        val current = readUnlocked().toMutableList()
+        current.removeAll { it.id == entry.id }
+        current.add(0, entry)
+        while (current.size > MAX_HISTORY) current.removeAt(current.lastIndex)
+        writeUnlocked(current)
+    }
+
+    fun update(id: String, transform: (DownloadRecord) -> DownloadRecord): DownloadRecord? =
+        synchronized(FILE_LOCK) {
+            val current = readUnlocked().toMutableList()
+            val index = current.indexOfFirst { it.id == id }
+            if (index < 0) return null
+            val updated = transform(current[index])
+            current[index] = updated
+            writeUnlocked(current)
+            updated
+        }
+
+    fun clearFinished() = synchronized(FILE_LOCK) {
+        val active = readUnlocked().filter { DownloadStatus.isActive(it.status) }
+        writeUnlocked(active)
+    }
+
+    private fun readUnlocked(): List<DownloadRecord> {
         if (!file.exists()) return emptyList()
-        runCatching {
+        return runCatching {
             val array = JSONArray(file.readText())
             buildList {
                 for (i in 0 until array.length()) {
                     val item = array.getJSONObject(i)
                     add(
-                        HistoryEntry(
+                        DownloadRecord(
                             id = item.getString("id"),
                             title = item.optString("title", "Video"),
                             url = item.optString("url"),
                             quality = item.optInt("quality"),
-                            path = item.optString("path").takeIf { it.isNotBlank() },
-                            status = item.optString("status", "unknown"),
+                            filePath = item.optString("filePath", item.optString("path"))
+                                .takeIf { it.isNotBlank() },
+                            status = item.optString("status", DownloadStatus.FAILED),
+                            stage = item.optString("stage", item.optString("status", "unknown")),
+                            progress = item.optDouble("progress", 0.0).toFloat(),
+                            speedBytesPerSecond = item.optLong("speedBytesPerSecond", 0L),
+                            etaSeconds = if (item.has("etaSeconds") && !item.isNull("etaSeconds")) {
+                                item.optLong("etaSeconds")
+                            } else null,
+                            estimatedBytes = if (item.has("estimatedBytes") && !item.isNull("estimatedBytes")) {
+                                item.optLong("estimatedBytes")
+                            } else null,
+                            downloadedBytes = item.optLong("downloadedBytes", 0L),
                             timestamp = item.optLong("timestamp"),
                             error = item.optString("error").takeIf { it.isNotBlank() }
                         )
@@ -43,22 +103,23 @@ class HistoryStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    fun add(entry: HistoryEntry) = synchronized(FILE_LOCK) {
-        val current = readAll().toMutableList()
-        current.removeAll { it.id == entry.id }
-        current.add(0, entry)
-        while (current.size > 100) current.removeAt(current.lastIndex)
-
+    private fun writeUnlocked(entries: List<DownloadRecord>) {
         val array = JSONArray()
-        current.forEach { item ->
+        entries.forEach { item ->
             array.put(
                 JSONObject()
                     .put("id", item.id)
                     .put("title", item.title)
                     .put("url", item.url)
                     .put("quality", item.quality)
-                    .put("path", item.path ?: "")
+                    .put("filePath", item.filePath ?: "")
                     .put("status", item.status)
+                    .put("stage", item.stage)
+                    .put("progress", item.progress)
+                    .put("speedBytesPerSecond", item.speedBytesPerSecond)
+                    .put("etaSeconds", item.etaSeconds ?: JSONObject.NULL)
+                    .put("estimatedBytes", item.estimatedBytes ?: JSONObject.NULL)
+                    .put("downloadedBytes", item.downloadedBytes)
                     .put("timestamp", item.timestamp)
                     .put("error", item.error ?: "")
             )
@@ -66,11 +127,8 @@ class HistoryStore(context: Context) {
         file.writeText(array.toString())
     }
 
-    fun clear() = synchronized(FILE_LOCK) {
-        if (file.exists()) file.delete()
-    }
-
     companion object {
+        private const val MAX_HISTORY = 150
         private val FILE_LOCK = Any()
     }
 }
