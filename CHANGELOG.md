@@ -1,28 +1,42 @@
 # Changelog
 
+## 1.7.0
+
+- Rebuild the normal YouTube path around one authenticated yt-dlp request.
+- Use the current authenticated YouTube client workaround: `default,web_embedded`.
+- Stop doing sequential extractor-client probing before normal metadata results.
+- Read the Android WebView cookie database instead of flattening only youtube.com cookies.
+- Preserve cookie domain, path, secure flag and expiry.
+- Restrict exported browser cookies to YouTube/Google/GoogleVideo domains.
+- Reuse the exact WebView User-Agent as a request header for metadata and downloads.
+- Automatically migrate an existing in-app browser session to the improved cookie format.
+- Run yt-dlp refresh in the background at app startup.
+- Reduce metadata socket timeout to 5 seconds with one retry.
+- Key metadata cache by both URL and current session file timestamp.
+- Treat "The page needs to be reloaded" as recoverable metadata state.
+- Treat yt-dlp "The downloaded file is empty" as a recoverable download failure.
+- Let yt-dlp own temporary and final download paths.
+- Keep partial fragments under `Downloads/Yrb/.partial/<job-id>`.
+- Let yt-dlp/FFmpeg move the completed file directly into `Downloads/Yrb`.
+- Remove the duplicate connected-session status sentence from the home screen.
+- Preserve quality detection, file-size estimates, audio-language selection, live progress, History and notifications.
+
+## 1.6.0
+
+- Validate completed media inside each download attempt before leaving the recovery loop.
+- Treat zero-byte output as a failed playback route rather than finalizing a broken file.
+- Put YouTube connection state ahead of download controls when a session is required.
+- Link authentication errors directly back to the in-app sign-in flow.
+
 ## 1.5.0
 
-Release build verified by GitHub Actions.
-
 - Add an in-app YouTube session browser.
-- Let the user sign in directly on YouTube/Google pages inside Yrb.
-- Add an explicit **Use this session** action after sign-in.
-- Capture only the local browser cookie jar; Yrb does not receive the user's password.
-- Convert the session to a private Netscape cookies file for yt-dlp.
-- Store session material in Android no-backup app storage.
-- Reuse the WebView user-agent with the saved session.
-- Apply the saved session to both metadata inspection and media downloads.
+- Convert the user's local browser session into a private cookies file for yt-dlp.
+- Reuse the browser User-Agent.
+- Apply the session to metadata inspection and downloads.
 - Keep manual cookies.txt import as a fallback.
-- Keep remove/replace session controls in the main UI.
-- Register the login browser as a non-exported Android activity.
-- Add unit coverage for authenticated YouTube session-cookie detection.
 
 ## 1.4.0
 
-- Recover automatically when a media download starts and later fails with HTTP 403.
-- Re-resolve the same selected quality and audio language through alternate playback clients.
-- Reset failed partial data before retrying to avoid corrupt resumptions.
-- Show Switching playback route / retry stages instead of immediately failing the job.
-- Preserve live progress/history/notification state across automatic retry attempts.
-- Add bounded HTTP and fragment retries before switching routes.
-- Prioritize default, IPv4, Safari HLS and web_embedded anonymous routes.
+- Add automatic recovery for recoverable YouTube media HTTP 403 failures.
+- Preserve live progress/history/notification state across retry attempts.
