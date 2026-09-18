@@ -2,6 +2,8 @@
 
 ## 1.4.0
 
+Release build verified by GitHub Actions.
+
 - Recover automatically when a media download starts and later fails with HTTP 403.
 - Re-resolve the same selected quality and audio language through alternate playback clients.
 - Reset failed partial data before retrying to avoid corrupt resumptions.
