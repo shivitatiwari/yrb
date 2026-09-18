@@ -191,8 +191,12 @@ object YtDlpClient {
             request.addOption("--force-ipv4")
         }
 
-        SessionStore(context).cookieFileOrNull()?.let { cookieFile ->
+        val sessionStore = SessionStore(context)
+        sessionStore.cookieFileOrNull()?.let { cookieFile ->
             request.addOption("--cookies", cookieFile.absolutePath)
+        }
+        sessionStore.userAgentOrNull()?.let { userAgent ->
+            request.addOption("--user-agent", userAgent)
         }
 
         val response = YoutubeDL.getInstance().execute(request)
