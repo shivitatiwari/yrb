@@ -540,6 +540,7 @@ object YtDlpClient {
     private val RECOVERABLE_MARKERS = listOf(
         "sign in to confirm",
         "not a bot",
+        "page needs to be reloaded",
         "http error 403",
         "forbidden",
         "po token",
