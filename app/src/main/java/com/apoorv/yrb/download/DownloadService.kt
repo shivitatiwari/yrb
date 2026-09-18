@@ -4,6 +4,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.media.MediaScannerConnection
 import android.os.Build
@@ -13,6 +15,7 @@ import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
+import androidx.core.content.ContextCompat
 import com.apoorv.yrb.MainActivity
 import com.apoorv.yrb.data.HistoryEntry
 import com.apoorv.yrb.data.HistoryStore
@@ -102,7 +105,7 @@ class DownloadService : Service() {
                     if (percent != lastPercent && (now - lastUpdateAt >= 400 || percent == 100)) {
                         lastPercent = percent
                         lastUpdateAt = now
-                        NotificationManagerCompat.from(this).notify(
+                        notifySafely(
                             PROGRESS_NOTIFICATION_ID,
                             progressNotification(title, percent, etaSeconds)
                         )
@@ -145,7 +148,7 @@ class DownloadService : Service() {
             sendBroadcast(Intent(ACTION_HISTORY_CHANGED).setPackage(packageName))
 
             stopForeground(STOP_FOREGROUND_REMOVE)
-            NotificationManagerCompat.from(this).notify(
+            notifySafely(
                 COMPLETE_NOTIFICATION_ID,
                 completeNotification(title, quality, file)
             )
@@ -166,7 +169,7 @@ class DownloadService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
 
             if (t !is CancellationException) {
-                NotificationManagerCompat.from(this).notify(
+                notifySafely(
                     FAILED_NOTIFICATION_ID,
                     failedNotification(title, t.message ?: "Download failed")
                 )
@@ -248,6 +251,23 @@ class DownloadService : Service() {
             .setAutoCancel(true)
             .setContentIntent(openApp)
             .build()
+    }
+
+    private fun notifySafely(id: Int, notification: android.app.Notification) {
+        val allowed =
+            Build.VERSION.SDK_INT < 33 ||
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+
+        if (!allowed) return
+
+        try {
+            NotificationManagerCompat.from(this).notify(id, notification)
+        } catch (_: SecurityException) {
+            // The user or system can revoke notification access between check and post.
+        }
     }
 
     private fun mimeFor(file: File): String {
