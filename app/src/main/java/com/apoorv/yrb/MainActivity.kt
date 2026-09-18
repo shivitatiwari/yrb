@@ -519,26 +519,22 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium
                 )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        "X · @sandilyapoorv",
-                        modifier = Modifier.clickable {
-                            uriHandler.openUri("https://x.com/sandilyapoorv")
-                        },
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Instagram · apoorvsandilya",
-                        modifier = Modifier.clickable {
-                            uriHandler.openUri("https://instagram.com/apoorvsandilya")
-                        },
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                Text(
+                    "X · @sandilyapoorv",
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri("https://x.com/sandilyapoorv")
+                    },
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "Instagram · apoorvsandilya",
+                    modifier = Modifier.clickable {
+                        uriHandler.openUri("https://instagram.com/apoorvsandilya")
+                    },
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }
