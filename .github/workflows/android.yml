@@ -51,14 +51,14 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/Yrb-v1.0.0-debug.apk
-          cp app/build/outputs/bundle/release/app-release.aab dist/Yrb-v1.0.0-release-unsigned.aab
+          cp app/build/outputs/apk/debug/app-debug.apk dist/Yrb-v1.1.0-debug.apk
+          cp app/build/outputs/bundle/release/app-release.aab dist/Yrb-v1.1.0-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Yrb-v1.0.0
+          name: Yrb-v1.1.0
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -68,4 +68,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.0.0             --target "$GITHUB_SHA"             --title "Yrb v1.0.0"             --notes "Native Android YouTube downloader. yt-dlp and FFmpeg run on-device. Available resolutions are detected before download. Includes download history, Downloads/Yrb output, foreground progress notifications, cancellation, and tap-to-open completion notifications. The APK is debug-signed and installable. The AAB is unsigned because no production signing secret is stored in the repository."             dist/Yrb-v1.0.0-debug.apk             dist/Yrb-v1.0.0-release-unsigned.aab             dist/SHA256SUMS.txt
+          gh release create v1.1.0             --target "$GITHUB_SHA"             --title "Yrb v1.1.0"             --notes "Yrb v1.1.0 refreshes yt-dlp on-device, adds live download state with speed and ETA, shows estimated file sizes before download, introduces a dedicated downloading screen, keeps active jobs visible in History, isolates partial files, improves error messages, and refreshes the Material 3 UI. The APK is debug-signed and installable. The AAB is unsigned because no production signing secret is stored in the repository."             dist/Yrb-v1.1.0-debug.apk             dist/Yrb-v1.1.0-release-unsigned.aab             dist/SHA256SUMS.txt
