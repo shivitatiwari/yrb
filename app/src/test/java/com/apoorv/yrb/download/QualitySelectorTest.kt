@@ -3,6 +3,7 @@ package com.apoorv.yrb.download
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class QualitySelectorTest {
@@ -28,6 +29,29 @@ class QualitySelectorTest {
                 )
             )
         )
+    }
+
+    @Test
+    fun acceptsNetscapeYouTubeSessionCookies() {
+        val text = """
+            # Netscape HTTP Cookie File
+            .youtube.com	TRUE	/	TRUE	1893456000	SID	redacted
+            .google.com	TRUE	/	TRUE	1893456000	HSID	redacted
+        """.trimIndent()
+
+        assertEquals(2, SessionCookieValidator.validateAndCount(text))
+    }
+
+    @Test
+    fun rejectsCookieFilesWithoutYouTubeOrGoogleSession() {
+        val text = """
+            # Netscape HTTP Cookie File
+            .example.com	TRUE	/	TRUE	1893456000	foo	bar
+        """.trimIndent()
+
+        assertThrows(IllegalStateException::class.java) {
+            SessionCookieValidator.validateAndCount(text)
+        }
     }
 
     @Test
