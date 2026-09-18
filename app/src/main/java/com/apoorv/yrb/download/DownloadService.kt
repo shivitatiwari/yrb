@@ -293,7 +293,9 @@ class DownloadService : Service() {
                 completeNotification(title, quality, finalFile)
             )
         } catch (t: Throwable) {
-            val cancelled = t is CancellationException
+            val alreadyCancelled =
+                HistoryStore(this).find(jobId)?.status == DownloadStatus.CANCELLED
+            val cancelled = t is CancellationException || alreadyCancelled
             val humanError = if (cancelled) null else ProgressLineParser.humanError(t.message)
 
             HistoryStore(this).update(jobId) {
