@@ -303,7 +303,7 @@ class MainActivity : ComponentActivity() {
             if (result.resultCode == Activity.RESULT_OK) {
                 sessionStatus = sessionStore.status()
                 sessionNotice = if (sessionStatus.connected) {
-                    "YouTube session connected. Downloads will use it automatically."
+                    null
                 } else {
                     "The sign-in window closed without a usable YouTube session."
                 }
