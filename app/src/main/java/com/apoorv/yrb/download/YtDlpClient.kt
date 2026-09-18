@@ -531,6 +531,9 @@ object YtDlpClient {
     internal fun anonymousFallbackNamesForTest(): List<String> =
         anonymousModes.map { it.key }
 
+    internal fun authenticatedExtractorArgsForTest(): String =
+        MODE_AUTHENTICATED.extractorArgs.orEmpty()
+
     private const val DEFAULT_LANGUAGE = "default"
 
     private val RECOVERABLE_MARKERS = listOf(
