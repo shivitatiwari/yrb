@@ -100,6 +100,10 @@ object YtDlpClient {
     private val cache = ConcurrentHashMap<String, CachedInspection>()
 
     private val MODE_DEFAULT = InspectionMode("default")
+    private val MODE_AUTHENTICATED = InspectionMode(
+        "authenticated",
+        extractorArgs = "youtube:player_client=default,web_embedded"
+    )
     private val MODE_IPV4 = InspectionMode("ipv4", forceIpv4 = true)
     private val MODE_WEB_SAFARI = InspectionMode(
         "web_safari_hls",
@@ -120,31 +124,46 @@ object YtDlpClient {
 
     fun inspect(context: Context, url: String): VideoInspection {
         val normalized = url.trim()
+        val sessionStore = SessionStore(context)
+        val cookieFile = sessionStore.cookieFileOrNull()
+        val sessionKey = cookieFile?.lastModified()?.toString() ?: "anonymous"
+        val cacheKey = normalized + "|" + sessionKey
         val now = System.currentTimeMillis()
 
-        cache[normalized]?.let { cached ->
+        cache[cacheKey]?.let { cached ->
             if (now - cached.createdAt <= CACHE_TTL_MS) {
                 return cached.inspection
             }
-            cache.remove(normalized)
+            cache.remove(cacheKey)
         }
 
-        val firstPass = tryModes(context, normalized, anonymousModes)
-        val inspection = firstPass.getOrElse { firstError ->
+        val mode = if (cookieFile != null) {
+            MODE_AUTHENTICATED
+        } else {
+            MODE_DEFAULT
+        }
+
+        val inspection = runCatching {
+            inspectOnce(context, normalized, mode)
+        }.getOrElse { firstError ->
             if (!shouldTryRecovery(firstError)) throw firstError
 
-            // YouTube changes frequently. Refresh yt-dlp only after the fast path fails,
-            // then repeat the documented anonymous client fallbacks.
             YtDlpRuntime.refreshIfDue(context, force = true)
-            tryModes(context, normalized, anonymousModes).getOrElse { finalError ->
+
+            runCatching {
+                inspectOnce(context, normalized, mode)
+            }.getOrElse { finalError ->
                 throw IllegalStateException(
-                    friendlyAnonymousFailure(finalError),
+                    friendlyInspectionFailure(
+                        finalError,
+                        authenticated = cookieFile != null
+                    ),
                     finalError
                 )
             }
         }
 
-        cache[normalized] = CachedInspection(now, inspection)
+        cache[cacheKey] = CachedInspection(now, inspection)
         return inspection
     }
 
@@ -181,7 +200,7 @@ object YtDlpClient {
             .addOption("--no-playlist")
             .addOption("--no-warnings")
             .addOption("--quiet")
-            .addOption("--socket-timeout", "8")
+            .addOption("--socket-timeout", "5")
             .addOption("--retries", "1")
 
         mode.extractorArgs?.let {
@@ -196,7 +215,7 @@ object YtDlpClient {
             request.addOption("--cookies", cookieFile.absolutePath)
         }
         sessionStore.userAgentOrNull()?.let { userAgent ->
-            request.addOption("--user-agent", userAgent)
+            request.addOption("--add-header", "User-Agent:" + userAgent)
         }
 
         val response = YoutubeDL.getInstance().execute(request)
@@ -419,21 +438,32 @@ object YtDlpClient {
         return RECOVERABLE_MARKERS.any { marker -> message.contains(marker) }
     }
 
-    private fun friendlyAnonymousFailure(error: Throwable): String {
+    private fun friendlyInspectionFailure(
+        error: Throwable,
+        authenticated: Boolean
+    ): String {
         val message = generateSequence(error) { it.cause }
             .mapNotNull { it.message }
             .joinToString("\n")
             .lowercase()
 
-        return if (
+        if (authenticated && message.contains("page needs to be reloaded")) {
+            return "YouTube rejected the saved browser session. Refresh the YouTube connection and try again."
+        }
+
+        if (
             message.contains("sign in to confirm") ||
             message.contains("not a bot") ||
-            message.contains("http error 403")
+            message.contains("login required")
         ) {
-            "YouTube blocked every anonymous extraction route Yrb could use for this video."
-        } else {
-            ProgressLineParser.humanError(error.message)
+            return if (authenticated) {
+                "The saved YouTube session is no longer accepted. Refresh the YouTube connection."
+            } else {
+                "YouTube requires a signed-in session for this video."
+            }
         }
+
+        return ProgressLineParser.humanError(error.message)
     }
 
     private fun languageLabel(languageId: String, formatNote: String): String {
