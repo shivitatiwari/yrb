@@ -114,8 +114,7 @@ class SessionStore(private val context: Context) {
         cookieManager.flush()
 
         val sources = listOf(
-            ".youtube.com" to "https://www.youtube.com/",
-            ".google.com" to "https://accounts.google.com/"
+            ".youtube.com" to "https://www.youtube.com/"
         )
 
         val seen = linkedSetOf<String>()
@@ -171,6 +170,10 @@ class SessionStore(private val context: Context) {
     fun clear() {
         runCatching { cookieFile.delete() }
         prefs.edit().remove(KEY_USER_AGENT).apply()
+        runCatching {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+        }
     }
 
     companion object {
