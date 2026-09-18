@@ -14,8 +14,19 @@ class QualitySelectorTest {
     @Test
     fun anonymousFallbackOrderIsStable() {
         assertEquals(
-            listOf("default", "ipv4", "web_safari", "android_vr", "web_embedded"),
+            listOf("default", "ipv4", "web_safari_hls", "web_embedded"),
             YtDlpClient.anonymousFallbackNamesForTest()
+        )
+    }
+
+    @Test
+    fun download403IsRecoverable() {
+        assertTrue(
+            YtDlpClient.isRecoverableDownloadError(
+                IllegalStateException(
+                    "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+                )
+            )
         )
     }
 
