@@ -9,55 +9,8 @@ data class SessionStatus(
     val cookieCount: Int = 0
 )
 
-class SessionStore(private val context: Context) {
-    private val cookieFile = File(context.noBackupFilesDir, COOKIE_FILE_NAME)
-
-    fun status(): SessionStatus {
-        if (!cookieFile.exists() || cookieFile.length() <= 0L) {
-            return SessionStatus(connected = false)
-        }
-
-        val count = runCatching {
-            cookieFile.useLines { lines ->
-                lines.count { line ->
-                    val trimmed = line.trim()
-                    trimmed.isNotEmpty() &&
-                        !trimmed.startsWith("#") &&
-                        trimmed.split('\t').size >= 7
-                }
-            }
-        }.getOrDefault(0)
-
-        return SessionStatus(
-            connected = count > 0,
-            cookieCount = count
-        )
-    }
-
-    fun cookieFileOrNull(): File? =
-        cookieFile.takeIf { status().connected }
-
-    fun importFrom(uri: Uri): Result<SessionStatus> = runCatching {
-        val text = context.contentResolver.openInputStream(uri)
-            ?.bufferedReader()
-            ?.use { it.readText() }
-            ?: error("Could not read the selected file.")
-
-        validate(text)
-
-        cookieFile.parentFile?.mkdirs()
-        cookieFile.writeText(text)
-
-        status().also {
-            check(it.connected) { "No usable cookies were found." }
-        }
-    }
-
-    fun clear() {
-        runCatching { cookieFile.delete() }
-    }
-
-    private fun validate(text: String) {
+object SessionCookieValidator {
+    fun validateAndCount(text: String): Int {
         val lines = text.lineSequence()
             .map { it.trimEnd() }
             .filter { it.isNotBlank() }
@@ -83,6 +36,50 @@ class SessionStore(private val context: Context) {
         check(hasYouTubeOrGoogle) {
             "The selected cookies file does not contain a YouTube/Google session."
         }
+
+        return cookieRows.size
+    }
+}
+
+class SessionStore(private val context: Context) {
+    private val cookieFile = File(context.noBackupFilesDir, COOKIE_FILE_NAME)
+
+    fun status(): SessionStatus {
+        if (!cookieFile.exists() || cookieFile.length() <= 0L) {
+            return SessionStatus(connected = false)
+        }
+
+        val count = runCatching {
+            SessionCookieValidator.validateAndCount(cookieFile.readText())
+        }.getOrDefault(0)
+
+        return SessionStatus(
+            connected = count > 0,
+            cookieCount = count
+        )
+    }
+
+    fun cookieFileOrNull(): File? =
+        cookieFile.takeIf { status().connected }
+
+    fun importFrom(uri: Uri): Result<SessionStatus> = runCatching {
+        val text = context.contentResolver.openInputStream(uri)
+            ?.bufferedReader()
+            ?.use { it.readText() }
+            ?: error("Could not read the selected file.")
+
+        SessionCookieValidator.validateAndCount(text)
+
+        cookieFile.parentFile?.mkdirs()
+        cookieFile.writeText(text)
+
+        status().also {
+            check(it.connected) { "No usable cookies were found." }
+        }
+    }
+
+    fun clear() {
+        runCatching { cookieFile.delete() }
     }
 
     companion object {
