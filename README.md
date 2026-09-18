@@ -4,45 +4,36 @@ Yrb is a native Android YouTube downloader. yt-dlp and FFmpeg run entirely on th
 
 ## v1.5.0
 
-Yrb now supports a private per-device YouTube session.
+Yrb can now use the user's own YouTube browser session without requiring an external cookies.txt export.
 
-When YouTube blocks anonymous extraction/downloads, the user can import a standard Netscape `cookies.txt` file once. Yrb immediately copies it into Android private no-backup storage and automatically passes it to yt-dlp for:
+### Connect YouTube
 
-- video inspection
-- format discovery
-- download-time retries
-- actual media downloads
+1. Tap **Sign in to YouTube** inside Yrb.
+2. Yrb opens a private in-app browser pointed at YouTube.
+3. Sign in on Google's/YouTube's own page.
+4. When YouTube shows the account as signed in, tap **Use this session**.
+5. Yrb converts the local WebView cookie jar into a Netscape-format cookies file stored under Android private no-backup storage.
+6. Metadata inspection and media downloads automatically pass that private cookie file to yt-dlp.
+7. Yrb also reuses the same WebView user-agent because yt-dlp notes that authenticated/session-sensitive downloads can depend on matching cookies and request headers.
 
-The imported session is never committed to GitHub, bundled into the APK, uploaded to Yrb infrastructure, or shown in logs/UI.
+Yrb never receives the user's Google password. No JavaScript bridge is injected into the login page, and the saved session is not uploaded to a backend, committed to GitHub, or included in release assets.
 
-Session state is visible in the Download screen:
+Manual **Import cookies.txt** remains available as a fallback.
 
-- Not connected
-- Connected / stored only on this device
-- Replace session
-- Remove session
+Google can restrict embedded WebView sign-in on some accounts/devices. If that happens, the manual cookie-file import path remains the reliable fallback because yt-dlp's current YouTube documentation says OAuth login no longer works and cookies are required.
 
-If YouTube returns a sign-in/bot/authenticated-session error, the error card exposes an Import/Replace YouTube session action directly.
+## Existing features
 
-A normal Google OAuth token is not a replacement for YouTube browser cookies, and Google sign-in inside an embedded WebView is not used as the authentication mechanism. Yrb instead uses yt-dlp's supported cookies-file path.
-
-## Existing behavior
-
-- Automatic anonymous fallback routes for recoverable YouTube failures
-- Download-time HTTP 403 recovery
-- 360p / 480p / 720p / 1080p / 1440p / 4K quality detection
+- 360p / 480p / 720p / 1080p / 1440p / 4K availability detection
 - file-size estimates
 - multi-audio language selection
-- local progress, speed, ETA and bytes written
-- foreground download notification and cancellation
-- active/completed History
+- real local progress based on yt-dlp output + bytes written
+- speed and ETA
+- live History
+- foreground notifications and cancellation
+- automatic recovery across alternate playback routes after recoverable 403s
 - on-device FFmpeg merging
 - completed files in `Downloads/Yrb`
-- creator/contact information for Apoorv Sandilya
-
-## Session storage
-
-Imported cookies are stored at an app-private path under Android's no-backup directory. The file is readable only by Yrb under the normal Android application sandbox and is not included in Android backup.
 
 ## Android
 
