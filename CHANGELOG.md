@@ -2,6 +2,8 @@
 
 ## 1.3.0
 
+Release build verified by GitHub Actions.
+
 - Add documented anonymous YouTube fallback ladder.
 - Keep normal/default extraction first for every new URL.
 - Retry the default path with IPv4.
