@@ -183,6 +183,7 @@ class DownloadService : Service() {
             var attemptIndex = 0
             var response: YoutubeDLResponse? = null
             var successfulOption = initialOption
+            var successfulSourceFile: File? = null
             var lastError: Throwable? = null
 
             while (attemptIndex < attempts.size) {
@@ -225,7 +226,7 @@ class DownloadService : Service() {
                 )
 
                 try {
-                    response = executeDownloadAttempt(
+                    val attemptResponse = executeDownloadAttempt(
                         url = url,
                         option = option,
                         jobDir = jobDir,
@@ -234,6 +235,14 @@ class DownloadService : Service() {
                     )
                     monitorJob.cancel()
                     monitorJob.join()
+
+                    val attemptFile = findCompletedMediaFile(jobDir, attemptResponse)
+                    if (attemptFile == null || attemptFile.length() <= 0L) {
+                        throw IllegalStateException("The downloaded file is empty.")
+                    }
+
+                    response = attemptResponse
+                    successfulSourceFile = attemptFile
                     successfulOption = option
                     break
                 } catch (t: Throwable) {
@@ -309,18 +318,12 @@ class DownloadService : Service() {
             }
             broadcastHistoryChange(jobId)
 
-            val printedPath = successfulResponse.out
-                .lineSequence()
-                .map { it.trim() }
-                .lastOrNull { it.startsWith(jobDir.absolutePath) }
+            val sourceFile = successfulSourceFile
+                ?: findCompletedMediaFile(jobDir, successfulResponse)
+                ?: error("yt-dlp finished but the completed media file could not be located.")
 
-            val sourceFile = printedPath?.let(::File)?.takeIf { it.exists() }
-                ?: jobDir.listFiles()
-                    ?.filter { it.isFile && !it.name.endsWith(".part") }
-                    ?.maxByOrNull { it.lastModified() }
-
-            if (sourceFile == null || !sourceFile.exists()) {
-                error("yt-dlp finished but the completed media file could not be located.")
+            if (sourceFile.length() <= 0L) {
+                error("The downloaded file is empty.")
             }
 
             val finalFile = File(rootDir, sourceFile.name)
@@ -410,6 +413,21 @@ class DownloadService : Service() {
             activeJob = null
             stopSelf(startId)
         }
+    }
+
+    private fun findCompletedMediaFile(
+        jobDir: File,
+        response: YoutubeDLResponse
+    ): File? {
+        val printedPath = response.out
+            .lineSequence()
+            .map { it.trim() }
+            .lastOrNull { it.startsWith(jobDir.absolutePath) }
+
+        return printedPath?.let(::File)?.takeIf { it.exists() }
+            ?: jobDir.listFiles()
+                ?.filter { it.isFile && !it.name.endsWith(".part") }
+                ?.maxByOrNull { it.lastModified() }
     }
 
     private fun startAttemptMonitor(
