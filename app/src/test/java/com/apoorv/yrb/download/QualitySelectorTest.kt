@@ -40,6 +40,15 @@ class QualitySelectorTest {
     }
 
     @Test
+    fun emptyFileFailureIsRecoverable() {
+        assertTrue(
+            YtDlpClient.isRecoverableDownloadError(
+                IllegalStateException("The downloaded file is empty")
+            )
+        )
+    }
+
+    @Test
     fun acceptsNetscapeYouTubeSessionCookies() {
         val text = """
             # Netscape HTTP Cookie File
