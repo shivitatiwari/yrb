@@ -17,7 +17,9 @@ data class QualityOption(
     val height: Int,
     val selector: String,
     val estimatedBytes: Long?,
-    val approximate: Boolean
+    val approximate: Boolean,
+    val extractorArgs: String? = null,
+    val forceIpv4: Boolean = false
 ) {
     val label: String
         get() = if (height == 2160) "4K" else height.toString() + "p"
@@ -39,6 +41,12 @@ data class VideoInspection(
 object QualitySelector {
     val supported = listOf(2160, 1440, 1080, 720, 480, 360)
 }
+
+private data class InspectionMode(
+    val key: String,
+    val extractorArgs: String? = null,
+    val forceIpv4: Boolean = false
+)
 
 private data class FormatCandidate(
     val id: String,
@@ -87,6 +95,17 @@ object YtDlpClient {
     private const val CACHE_TTL_MS = 10L * 60L * 1000L
     private val cache = ConcurrentHashMap<String, CachedInspection>()
 
+    @Volatile
+    private var preferredModeKey: String = MODE_DEFAULT.key
+
+    private val anonymousModes = listOf(
+        MODE_DEFAULT,
+        MODE_IPV4,
+        MODE_WEB_SAFARI,
+        MODE_ANDROID_VR,
+        MODE_WEB_EMBEDDED
+    )
+
     fun inspect(context: Context, url: String): VideoInspection {
         val normalized = url.trim()
         val now = System.currentTimeMillis()
@@ -98,24 +117,76 @@ object YtDlpClient {
             cache.remove(normalized)
         }
 
-        val firstAttempt = runCatching { inspectOnce(normalized) }
-        val inspection = firstAttempt.getOrElse { firstError ->
-            val refreshed = YtDlpRuntime.refreshIfDue(context, force = true)
-            if (!refreshed) throw firstError
-            inspectOnce(normalized)
+        val initialModes = orderedModes()
+        val firstPass = tryModes(normalized, initialModes)
+        val inspection = firstPass.getOrElse { firstError ->
+            if (!shouldTryRecovery(firstError)) throw firstError
+
+            // YouTube changes frequently. Refresh yt-dlp only after the fast path fails,
+            // then repeat the documented anonymous client fallbacks.
+            YtDlpRuntime.refreshIfDue(context, force = true)
+            tryModes(normalized, orderedModes()).getOrElse { finalError ->
+                throw IllegalStateException(
+                    friendlyAnonymousFailure(finalError),
+                    finalError
+                )
+            }
         }
 
         cache[normalized] = CachedInspection(now, inspection)
         return inspection
     }
 
-    private fun inspectOnce(url: String): VideoInspection {
+    private fun orderedModes(): List<InspectionMode> {
+        val preferred = anonymousModes.firstOrNull { it.key == preferredModeKey }
+            ?: MODE_DEFAULT
+        return buildList {
+            add(preferred)
+            anonymousModes.forEach { if (it.key != preferred.key) add(it) }
+        }
+    }
+
+    private fun tryModes(
+        url: String,
+        modes: List<InspectionMode>
+    ): Result<VideoInspection> {
+        var lastError: Throwable? = null
+
+        for (mode in modes) {
+            val result = runCatching { inspectOnce(url, mode) }
+            result.onSuccess {
+                preferredModeKey = mode.key
+                return result
+            }.onFailure {
+                lastError = it
+                if (!shouldTryRecovery(it)) return Result.failure(it)
+            }
+        }
+
+        return Result.failure(
+            lastError ?: IllegalStateException("Video inspection failed.")
+        )
+    }
+
+    private fun inspectOnce(
+        url: String,
+        mode: InspectionMode
+    ): VideoInspection {
         val request = YoutubeDLRequest(url)
             .addOption("--dump-single-json")
             .addOption("--skip-download")
             .addOption("--no-playlist")
             .addOption("--no-warnings")
             .addOption("--quiet")
+            .addOption("--socket-timeout", "8")
+            .addOption("--retries", "1")
+
+        mode.extractorArgs?.let {
+            request.addOption("--extractor-args", it)
+        }
+        if (mode.forceIpv4) {
+            request.addOption("--force-ipv4")
+        }
 
         val response = YoutubeDL.getInstance().execute(request)
         val root = JSONObject(response.out.trim())
@@ -226,7 +297,8 @@ object YtDlpClient {
                 candidates = candidates,
                 audio = chosenAudio,
                 durationSeconds = duration,
-                allowCombinedFallback = languageIds.size == 1
+                allowCombinedFallback = languageIds.size == 1,
+                mode = mode
             )
         }.filterValues { it.isNotEmpty() }
 
@@ -257,7 +329,8 @@ object YtDlpClient {
         candidates: List<FormatCandidate>,
         audio: FormatCandidate?,
         durationSeconds: Long?,
-        allowCombinedFallback: Boolean
+        allowCombinedFallback: Boolean,
+        mode: InspectionMode
     ): List<QualityOption> {
         return QualitySelector.supported.mapNotNull { height ->
             val exact = candidates.filter { it.height == height }
@@ -282,7 +355,9 @@ object YtDlpClient {
                     height = height,
                     selector = videoOnly.id + "+" + audio.id,
                     estimatedBytes = total,
-                    approximate = videoApprox || audioApprox
+                    approximate = videoApprox || audioApprox,
+                    extractorArgs = mode.extractorArgs,
+                    forceIpv4 = mode.forceIpv4
                 )
             } else if (allowCombinedFallback) {
                 val combined = exact
@@ -299,11 +374,43 @@ object YtDlpClient {
                     height = height,
                     selector = combined.id,
                     estimatedBytes = bytes,
-                    approximate = approximate
+                    approximate = approximate,
+                    extractorArgs = mode.extractorArgs,
+                    forceIpv4 = mode.forceIpv4
                 )
             } else {
                 null
             }
+        }
+    }
+
+    private fun shouldTryRecovery(error: Throwable): Boolean {
+        val message = generateSequence(error) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString("
+")
+            .lowercase()
+
+        if (message.isBlank()) return true
+
+        return RECOVERABLE_MARKERS.any { marker -> message.contains(marker) }
+    }
+
+    private fun friendlyAnonymousFailure(error: Throwable): String {
+        val message = generateSequence(error) { it.cause }
+            .mapNotNull { it.message }
+            .joinToString("
+")
+            .lowercase()
+
+        return if (
+            message.contains("sign in to confirm") ||
+            message.contains("not a bot") ||
+            message.contains("http error 403")
+        ) {
+            "YouTube blocked anonymous extraction on this network. Yrb tried the default client, IPv4, web_safari, android_vr and web_embedded fallbacks."
+        } else {
+            ProgressLineParser.humanError(error.message)
         }
     }
 
@@ -329,7 +436,39 @@ object YtDlpClient {
         }
     }
 
+    internal fun anonymousFallbackNamesForTest(): List<String> =
+        anonymousModes.map { it.key }
+
     private const val DEFAULT_LANGUAGE = "default"
+
+    private val MODE_DEFAULT = InspectionMode("default")
+    private val MODE_IPV4 = InspectionMode("ipv4", forceIpv4 = true)
+    private val MODE_WEB_SAFARI = InspectionMode(
+        "web_safari",
+        extractorArgs = "youtube:player_client=web_safari"
+    )
+    private val MODE_ANDROID_VR = InspectionMode(
+        "android_vr",
+        extractorArgs = "youtube:player_client=android_vr"
+    )
+    private val MODE_WEB_EMBEDDED = InspectionMode(
+        "web_embedded",
+        extractorArgs = "youtube:player_client=web_embedded"
+    )
+
+    private val RECOVERABLE_MARKERS = listOf(
+        "sign in to confirm",
+        "not a bot",
+        "http error 403",
+        "forbidden",
+        "po token",
+        "requested format is not available",
+        "no formats",
+        "no supported downloadable video resolutions",
+        "unable to download",
+        "timed out",
+        "timeout"
+    )
 }
 
 object FileSizeFormatter {
