@@ -1,49 +1,52 @@
 # Yrb
 
-Yrb is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy media through a server.
+Yrb is a native Android YouTube downloader. yt-dlp and FFmpeg run entirely on the phone.
 
-## v1.3.0
+## v1.4.0
 
-Yrb keeps the normal/default yt-dlp path fast. If YouTube blocks anonymous extraction or returns recoverable 403/format errors, Yrb automatically tries documented anonymous fallback paths in this order:
+The important change in v1.4.0 is **download-time recovery**.
 
-1. default yt-dlp client
-2. default client forced to IPv4
-3. `web_safari`, preferring HLS formats
-4. `android_vr`
-5. `web_embedded` for videos that permit embedding
+A YouTube format can be visible during metadata inspection but later be rejected by Google Video Server with HTTP 403. Yrb no longer treats that first 403 as terminal.
 
-If the first pass fails for a recoverable YouTube error, Yrb refreshes yt-dlp from the nightly channel and repeats the fallback ladder once.
+When a recoverable media 403 happens:
 
-The successful extractor mode is attached to each quality option and reused by the download service, so inspection and download do not silently use different YouTube clients.
+1. the failed yt-dlp process is stopped
+2. the failed partial attempt is discarded
+3. Yrb refreshes/re-resolves the same requested resolution and audio language
+4. alternate anonymous playback routes are tried automatically
+5. the Download screen stays active and shows the retry stage
 
-These fallbacks improve zero-login resilience but do not guarantee that every server-side YouTube bot/auth challenge can be satisfied anonymously.
+Current anonymous route order:
 
-## Existing behavior
+- default yt-dlp route
+- IPv4 retry
+- Safari HLS route
+- web_embedded when the video allows embedding
 
-- 10-minute inspection cache
-- downloadable 360p, 480p, 720p, 1080p, 1440p and 4K/2160p options
-- exact or estimated file sizes
+The previous android_vr fallback was removed from the recovery ladder because current YouTube enforcement can return 403 for its useful media formats.
+
+Yrb also gives yt-dlp a small bounded HTTP/fragment retry window before switching routes.
+
+If every anonymous route is rejected, Yrb reports a concise error explaining that the video currently requires a valid PO token or authenticated session rather than dumping raw yt-dlp logs.
+
+## Existing features
+
+- 360p / 480p / 720p / 1080p / 1440p / 4K availability detection
+- file-size estimates
 - multi-audio language selection
-- live progress, speed, ETA and bytes written
-- foreground notification with cancellation
-- History for active/completed jobs
-- on-device yt-dlp + FFmpeg only
-- output to `Downloads/Yrb`
+- real local progress based on yt-dlp output + bytes written
+- speed and ETA
+- live History
+- foreground notifications and cancellation
+- on-device FFmpeg merging
+- completed files in `Downloads/Yrb`
 - creator/contact information for Apoorv Sandilya
-
-## Download method
-
-Temporary work is written to:
-
-`Downloads/Yrb/.partial/<job-id>/`
-
-Yrb samples actual bytes written every 500 ms and combines that with yt-dlp's raw progress output. Separate video/audio streams are merged on-device with FFmpeg. The completed file is moved into `Downloads/Yrb/`.
 
 ## Android
 
 - Application ID: `com.apoorv.yrb`
-- versionCode: 4
-- versionName: 1.3.0
+- versionCode: 5
+- versionName: 1.4.0
 - minSdk: 30
 - targetSdk: 36
 - compileSdk: 36
