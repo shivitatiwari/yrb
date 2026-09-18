@@ -68,6 +68,26 @@ class HistoryStore(context: Context) {
         writeUnlocked(active)
     }
 
+    fun markActiveInterrupted() = synchronized(FILE_LOCK) {
+        val current = readUnlocked()
+        if (current.none { DownloadStatus.isActive(it.status) }) return
+        writeUnlocked(
+            current.map { item ->
+                if (DownloadStatus.isActive(item.status)) {
+                    item.copy(
+                        status = DownloadStatus.FAILED,
+                        stage = "Interrupted",
+                        speedBytesPerSecond = 0L,
+                        etaSeconds = null,
+                        error = "The app process stopped before this download completed."
+                    )
+                } else {
+                    item
+                }
+            }
+        )
+    }
+
     private fun readUnlocked(): List<DownloadRecord> {
         if (!file.exists()) return emptyList()
         return runCatching {
