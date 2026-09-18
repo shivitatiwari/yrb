@@ -533,8 +533,12 @@ class DownloadService : Service() {
             request.addOption("--force-ipv4")
         }
 
-        SessionStore(this).cookieFileOrNull()?.let { cookieFile ->
+        val sessionStore = SessionStore(this)
+        sessionStore.cookieFileOrNull()?.let { cookieFile ->
             request.addOption("--cookies", cookieFile.absolutePath)
+        }
+        sessionStore.userAgentOrNull()?.let { userAgent ->
+            request.addOption("--user-agent", userAgent)
         }
 
         return YoutubeDL.getInstance().execute(
