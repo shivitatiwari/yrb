@@ -75,6 +75,8 @@ class DownloadService : Service() {
         val title = intent.getStringExtra(EXTRA_TITLE)?.ifBlank { "YouTube video" } ?: "YouTube video"
         val quality = intent.getIntExtra(EXTRA_QUALITY, 0)
         val selector = intent.getStringExtra(EXTRA_SELECTOR) ?: return START_NOT_STICKY
+        val extractorArgs = intent.getStringExtra(EXTRA_EXTRACTOR_ARGS)
+        val forceIpv4 = intent.getBooleanExtra(EXTRA_FORCE_IPV4, false)
         val estimatedBytes = intent.getLongExtra(EXTRA_ESTIMATED_BYTES, -1L).takeIf { it > 0L }
 
         if (quality !in QualitySelector.supported) return START_NOT_STICKY
@@ -113,6 +115,8 @@ class DownloadService : Service() {
                 title = title,
                 quality = quality,
                 selector = selector,
+                extractorArgs = extractorArgs,
+                forceIpv4 = forceIpv4,
                 estimatedBytes = estimatedBytes,
                 processId = processId,
                 startId = startId
@@ -127,6 +131,8 @@ class DownloadService : Service() {
         title: String,
         quality: Int,
         selector: String,
+        extractorArgs: String?,
+        forceIpv4: Boolean,
         estimatedBytes: Long?,
         processId: String,
         startId: Int
@@ -245,6 +251,13 @@ class DownloadService : Service() {
                     File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
                 )
                 .addOption("--print", "after_move:%(filepath)s")
+
+            extractorArgs?.let {
+                request.addOption("--extractor-args", it)
+            }
+            if (forceIpv4) {
+                request.addOption("--force-ipv4")
+            }
 
             val response = YoutubeDL.getInstance().execute(
                 request = request,
@@ -599,6 +612,8 @@ class DownloadService : Service() {
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_QUALITY = "quality"
         private const val EXTRA_SELECTOR = "selector"
+        private const val EXTRA_EXTRACTOR_ARGS = "extractor_args"
+        private const val EXTRA_FORCE_IPV4 = "force_ipv4"
         private const val EXTRA_ESTIMATED_BYTES = "estimated_bytes"
         private const val CHANNEL_DOWNLOADS = "downloads"
         private const val CHANNEL_RESULTS = "download_results"
@@ -619,6 +634,8 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_QUALITY, quality.height)
                 .putExtra(EXTRA_SELECTOR, quality.selector)
+                .putExtra(EXTRA_EXTRACTOR_ARGS, quality.extractorArgs)
+                .putExtra(EXTRA_FORCE_IPV4, quality.forceIpv4)
                 .putExtra(EXTRA_ESTIMATED_BYTES, quality.estimatedBytes ?: -1L)
 
         fun cancelIntent(context: android.content.Context): Intent =
