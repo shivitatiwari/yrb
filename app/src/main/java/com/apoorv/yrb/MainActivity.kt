@@ -1,6 +1,7 @@
 package com.apoorv.yrb
 
 import android.Manifest
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -296,6 +297,20 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val sessionLoginLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                sessionStatus = sessionStore.status()
+                sessionNotice = if (sessionStatus.connected) {
+                    "YouTube session connected. Downloads will use it automatically."
+                } else {
+                    "The sign-in window closed without a usable YouTube session."
+                }
+                if (sessionStatus.connected) error = null
+            }
+        }
+
         LazyColumn(
             modifier = modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
@@ -409,7 +424,7 @@ class MainActivity : ComponentActivity() {
                                     if (sessionStatus.connected) {
                                         "Connected • stored only on this device"
                                     } else {
-                                        "Optional. Connect once if YouTube blocks anonymous downloads."
+                                        "Connect once inside Yrb. Your password stays in Google's page; Yrb stores only the local YouTube session."
                                     },
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodySmall
@@ -417,38 +432,56 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilledTonalButton(
+                                modifier = Modifier.fillMaxWidth(),
                                 onClick = {
-                                    sessionLauncher.launch(
-                                        arrayOf(
-                                            "text/plain",
-                                            "text/*",
-                                            "application/octet-stream"
+                                    sessionLoginLauncher.launch(
+                                        Intent(
+                                            this@MainActivity,
+                                            YouTubeLoginActivity::class.java
                                         )
                                     )
                                 }
                             ) {
                                 Text(
                                     if (sessionStatus.connected) {
-                                        "Replace session"
+                                        "Refresh YouTube sign-in"
                                     } else {
-                                        "Import session"
+                                        "Sign in to YouTube"
                                     }
                                 )
                             }
 
-                            if (sessionStatus.connected) {
-                                TextButton(
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
                                     onClick = {
-                                        sessionStore.clear()
-                                        sessionStatus = sessionStore.status()
-                                        sessionNotice = "YouTube session removed."
+                                        sessionLauncher.launch(
+                                            arrayOf(
+                                                "text/plain",
+                                                "text/*",
+                                                "application/octet-stream"
+                                            )
+                                        )
                                     }
                                 ) {
-                                    Text("Remove")
+                                    Text("Import cookies.txt")
+                                }
+
+                                if (sessionStatus.connected) {
+                                    TextButton(
+                                        onClick = {
+                                            sessionStore.clear()
+                                            sessionStatus = sessionStore.status()
+                                            sessionNotice = "YouTube session removed."
+                                        }
+                                    ) {
+                                        Text("Remove")
+                                    }
                                 }
                             }
                         }
