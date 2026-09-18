@@ -229,6 +229,7 @@ class DownloadService : Service() {
                     val attemptResponse = executeDownloadAttempt(
                         url = url,
                         option = option,
+                        rootDir = rootDir,
                         jobDir = jobDir,
                         processId = attemptProcessId,
                         telemetry = telemetry
