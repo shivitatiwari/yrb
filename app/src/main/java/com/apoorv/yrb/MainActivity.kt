@@ -923,8 +923,14 @@ class MainActivity : ComponentActivity() {
         title: String,
         option: QualityOption
     ): String {
+        val store = HistoryStore(this)
+        val existingActive = store.readAll().firstOrNull {
+            DownloadStatus.isActive(it.status)
+        }
+        if (existingActive != null) return existingActive.id
+
         val jobId = UUID.randomUUID().toString()
-        HistoryStore(this).upsert(
+        store.upsert(
             DownloadRecord(
                 id = jobId,
                 title = title,
