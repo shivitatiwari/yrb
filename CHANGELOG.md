@@ -2,6 +2,8 @@
 
 ## 1.5.0
 
+Release build verified by GitHub Actions.
+
 - Add an in-app YouTube session browser.
 - Let the user sign in directly on YouTube/Google pages inside Yrb.
 - Add an explicit **Use this session** action after sign-in.
