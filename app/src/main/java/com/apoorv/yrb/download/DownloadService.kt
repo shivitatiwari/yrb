@@ -533,6 +533,10 @@ class DownloadService : Service() {
             request.addOption("--force-ipv4")
         }
 
+        SessionStore(this).cookieFileOrNull()?.let { cookieFile ->
+            request.addOption("--cookies", cookieFile.absolutePath)
+        }
+
         return YoutubeDL.getInstance().execute(
             request = request,
             processId = processId,
