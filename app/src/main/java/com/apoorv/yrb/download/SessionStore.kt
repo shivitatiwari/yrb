@@ -1,6 +1,7 @@
 package com.apoorv.yrb.download
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.webkit.CookieManager
 import java.io.File
@@ -120,11 +121,12 @@ class SessionStore(private val context: Context) {
     ): Result<SessionStatus> = runCatching {
         cookieManager.flush()
 
-        val netscape = netscapeFromWebView(cookieManager)
+        val netscape = readWebViewCookieDatabase()
+            .getOrElse { buildCookieManagerFallback(cookieManager) }
 
         SessionCookieValidator.validateAndCount(netscape)
         check(SessionCookieValidator.looksAuthenticated(netscape)) {
-            "A signed-in YouTube session was not detected yet. Finish signing in first."
+            "A signed-in YouTube session was not detected yet. Finish signing in, then try again."
         }
 
         cookieFile.parentFile?.mkdirs()
@@ -136,46 +138,134 @@ class SessionStore(private val context: Context) {
         }
     }
 
-    private fun netscapeFromWebView(cookieManager: CookieManager): String {
-        val sources = listOf(
-            ".youtube.com" to "https://www.youtube.com/"
-        )
+    private fun readWebViewCookieDatabase(): Result<String> = runCatching {
+        val databaseFile = context.dataDir.resolve("app_webview/Default/Cookies")
+        check(databaseFile.exists()) { "WebView cookie database is not ready yet." }
 
+        val rows = mutableListOf<String>()
+        SQLiteDatabase.openDatabase(
+            databaseFile.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READONLY
+        ).use { database ->
+            val projection = arrayOf(
+                "host_key",
+                "path",
+                "name",
+                "value",
+                "expires_utc",
+                "is_secure"
+            )
+
+            database.query(
+                "cookies",
+                projection,
+                null,
+                null,
+                null,
+                null,
+                null
+            ).use { cursor ->
+                val hostIndex = cursor.getColumnIndexOrThrow("host_key")
+                val pathIndex = cursor.getColumnIndexOrThrow("path")
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                val valueIndex = cursor.getColumnIndexOrThrow("value")
+                val expiresIndex = cursor.getColumnIndexOrThrow("expires_utc")
+                val secureIndex = cursor.getColumnIndexOrThrow("is_secure")
+
+                while (cursor.moveToNext()) {
+                    val host = cursor.getString(hostIndex).orEmpty()
+                    if (!isYouTubeSessionDomain(host)) continue
+
+                    val name = cursor.getString(nameIndex).orEmpty()
+                    val value = cursor.getString(valueIndex).orEmpty()
+                    if (name.isBlank() || value.isBlank()) continue
+
+                    val path = cursor.getString(pathIndex).orEmpty().ifBlank { "/" }
+                    val secure = cursor.getInt(secureIndex) == 1
+                    val expiry = chromiumExpiryToUnixSeconds(
+                        cursor.getLong(expiresIndex)
+                    )
+                    val normalizedHost = if (host.startsWith(".")) host else ".$host"
+
+                    rows += listOf(
+                        normalizedHost,
+                        "TRUE",
+                        path,
+                        secure.toString().uppercase(),
+                        expiry.toString(),
+                        name,
+                        value
+                    ).joinToString("\t")
+                }
+            }
+        }
+
+        check(rows.isNotEmpty()) { "No YouTube/Google browser cookies were found." }
+
+        buildString {
+            appendLine("# Netscape HTTP Cookie File")
+            appendLine("# Generated locally by Yrb from Android WebView.")
+            appendLine("# This file never leaves the device.")
+            rows.forEach { appendLine(it) }
+        }
+    }
+
+    private fun buildCookieManagerFallback(cookieManager: CookieManager): String {
+        val sources = listOf(
+            ".youtube.com" to "https://www.youtube.com/",
+            ".google.com" to "https://accounts.google.com/"
+        )
         val seen = linkedSetOf<String>()
         val rows = mutableListOf<String>()
 
         for ((domain, url) in sources) {
-            val raw = cookieManager.getCookie(url).orEmpty()
-            raw.split(';').forEach { part ->
-                val trimmed = part.trim()
-                val eq = trimmed.indexOf('=')
-                if (eq <= 0) return@forEach
+            cookieManager.getCookie(url).orEmpty()
+                .split(';')
+                .forEach { part ->
+                    val trimmed = part.trim()
+                    val separator = trimmed.indexOf('=')
+                    if (separator <= 0) return@forEach
 
-                val name = trimmed.substring(0, eq).trim()
-                val value = trimmed.substring(eq + 1)
-                if (name.isBlank()) return@forEach
+                    val name = trimmed.substring(0, separator).trim()
+                    val value = trimmed.substring(separator + 1)
+                    if (name.isBlank() || value.isBlank()) return@forEach
+                    if (!seen.add(domain + "|" + name)) return@forEach
 
-                val dedupe = domain + "|" + name
-                if (!seen.add(dedupe)) return@forEach
-
-                rows += listOf(
-                    domain,
-                    "TRUE",
-                    "/",
-                    "TRUE",
-                    "0",
-                    name,
-                    value
-                ).joinToString("\t")
-            }
+                    rows += listOf(
+                        domain,
+                        "TRUE",
+                        "/",
+                        "TRUE",
+                        "0",
+                        name,
+                        value
+                    ).joinToString("\t")
+                }
         }
 
         return buildString {
             appendLine("# Netscape HTTP Cookie File")
-            appendLine("# Generated locally by Yrb from the user's in-app YouTube session.")
+            appendLine("# Generated locally by Yrb from Android WebView.")
             appendLine("# This file never leaves the device.")
             rows.forEach { appendLine(it) }
         }
+    }
+
+    private fun isYouTubeSessionDomain(host: String): Boolean {
+        val normalized = host.lowercase().removePrefix(".")
+        return normalized == "youtube.com" ||
+            normalized.endsWith(".youtube.com") ||
+            normalized == "google.com" ||
+            normalized.endsWith(".google.com") ||
+            normalized == "googlevideo.com" ||
+            normalized.endsWith(".googlevideo.com")
+    }
+
+    private fun chromiumExpiryToUnixSeconds(raw: Long): Long {
+        if (raw <= 0L) return 0L
+        val seconds = raw / 1_000_000L - 11_644_473_600L
+        return seconds.coerceAtLeast(0L)
     }
 
     fun clear() {
