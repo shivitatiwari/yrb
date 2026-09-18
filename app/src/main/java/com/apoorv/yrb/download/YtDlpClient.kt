@@ -96,6 +96,21 @@ object YtDlpClient {
     private const val CACHE_TTL_MS = 10L * 60L * 1000L
     private val cache = ConcurrentHashMap<String, CachedInspection>()
 
+    private val MODE_DEFAULT = InspectionMode("default")
+    private val MODE_IPV4 = InspectionMode("ipv4", forceIpv4 = true)
+    private val MODE_WEB_SAFARI = InspectionMode(
+        "web_safari",
+        extractorArgs = "youtube:player_client=web_safari"
+    )
+    private val MODE_ANDROID_VR = InspectionMode(
+        "android_vr",
+        extractorArgs = "youtube:player_client=android_vr"
+    )
+    private val MODE_WEB_EMBEDDED = InspectionMode(
+        "web_embedded",
+        extractorArgs = "youtube:player_client=web_embedded"
+    )
+
     private val anonymousModes = listOf(
         MODE_DEFAULT,
         MODE_IPV4,
@@ -382,8 +397,7 @@ object YtDlpClient {
     private fun shouldTryRecovery(error: Throwable): Boolean {
         val message = generateSequence(error) { it.cause }
             .mapNotNull { it.message }
-            .joinToString("
-")
+            .joinToString("\n")
             .lowercase()
 
         if (message.isBlank()) return true
@@ -394,8 +408,7 @@ object YtDlpClient {
     private fun friendlyAnonymousFailure(error: Throwable): String {
         val message = generateSequence(error) { it.cause }
             .mapNotNull { it.message }
-            .joinToString("
-")
+            .joinToString("\n")
             .lowercase()
 
         return if (
@@ -435,21 +448,6 @@ object YtDlpClient {
         anonymousModes.map { it.key }
 
     private const val DEFAULT_LANGUAGE = "default"
-
-    private val MODE_DEFAULT = InspectionMode("default")
-    private val MODE_IPV4 = InspectionMode("ipv4", forceIpv4 = true)
-    private val MODE_WEB_SAFARI = InspectionMode(
-        "web_safari",
-        extractorArgs = "youtube:player_client=web_safari"
-    )
-    private val MODE_ANDROID_VR = InspectionMode(
-        "android_vr",
-        extractorArgs = "youtube:player_client=android_vr"
-    )
-    private val MODE_WEB_EMBEDDED = InspectionMode(
-        "web_embedded",
-        extractorArgs = "youtube:player_client=web_embedded"
-    )
 
     private val RECOVERABLE_MARKERS = listOf(
         "sign in to confirm",
