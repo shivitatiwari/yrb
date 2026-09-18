@@ -55,14 +55,14 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/Yrb-v1.5.0-debug.apk
-          cp app/build/outputs/bundle/release/app-release.aab dist/Yrb-v1.5.0-release-unsigned.aab
+          cp app/build/outputs/apk/debug/app-debug.apk dist/Yrb-v1.6.0-debug.apk
+          cp app/build/outputs/bundle/release/app-release.aab dist/Yrb-v1.6.0-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Yrb-v1.5.0
+          name: Yrb-v1.6.0
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -72,4 +72,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.5.0             --target "$GITHUB_SHA"             --title "Yrb v1.5.0"             --notes "Yrb v1.5.0 adds an in-app YouTube session browser. Users can sign in to YouTube inside Yrb, then explicitly save that local browser session for yt-dlp. The session is converted to a private Netscape cookies file in Android no-backup storage and the matching WebView user-agent is reused for inspection and media downloads. Nothing is uploaded to a Yrb server. Manual cookies.txt import remains as a fallback."             dist/Yrb-v1.5.0-debug.apk             dist/Yrb-v1.5.0-release-unsigned.aab             dist/SHA256SUMS.txt
+          gh release create v1.6.0             --target "$GITHUB_SHA"             --title "Yrb v1.6.0"             --notes "Yrb v1.6.0 adds an in-app YouTube session browser. Users can sign in to YouTube inside Yrb, then explicitly save that local browser session for yt-dlp. The session is converted to a private Netscape cookies file in Android no-backup storage and the matching WebView user-agent is reused for inspection and media downloads. Nothing is uploaded to a Yrb server. Manual cookies.txt import remains as a fallback."             dist/Yrb-v1.6.0-debug.apk             dist/Yrb-v1.6.0-release-unsigned.aab             dist/SHA256SUMS.txt
