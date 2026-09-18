@@ -27,8 +27,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -83,7 +86,7 @@ class DownloadService : Service() {
         HistoryStore(this).update(jobId) {
             it.copy(
                 status = DownloadStatus.DOWNLOADING,
-                stage = "Preparing",
+                stage = "Starting",
                 progress = 0f,
                 speedBytesPerSecond = 0L,
                 etaSeconds = null
@@ -93,7 +96,14 @@ class DownloadService : Service() {
 
         startForeground(
             PROGRESS_NOTIFICATION_ID,
-            progressNotification(jobId, title, 0, 0L, null)
+            progressNotification(
+                jobId = jobId,
+                title = title,
+                progress = 0,
+                speed = 0L,
+                etaSeconds = null,
+                determinate = estimatedBytes != null
+            )
         )
 
         activeJob = scope.launch {
@@ -111,7 +121,7 @@ class DownloadService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun performDownload(
+    private suspend fun performDownload(
         jobId: String,
         url: String,
         title: String,
@@ -131,76 +141,67 @@ class DownloadService : Service() {
         jobDir.mkdirs()
 
         var completed = false
-        var maxProgress = 0f
-        var lastHistoryUpdateAt = 0L
-        var lastSampleAt = System.currentTimeMillis()
-        var lastSampleBytes = directoryBytes(jobDir)
+        var monitorJob: Job? = null
+
+        val rawPercent = AtomicReference<Float?>(null)
+        val rawSpeed = AtomicLong(-1L)
+        val rawEta = AtomicLong(-1L)
+        val currentStage = AtomicReference("Downloading")
 
         try {
-            HistoryStore(this).update(jobId) { it.copy(stage = "Refreshing extractor") }
-            broadcastHistoryChange(jobId)
-            YtDlpRuntime.ensureFresh(this)
-
-            HistoryStore(this).update(jobId) { it.copy(stage = "Downloading") }
+            HistoryStore(this).update(jobId) {
+                it.copy(stage = "Downloading")
+            }
             broadcastHistoryChange(jobId)
 
-            val request = YoutubeDLRequest(url)
-                .addOption("--no-playlist")
-                .addOption("-f", selector)
-                .addOption("--merge-output-format", "mp4/mkv")
-                .addOption("--newline")
-                .addOption("--concurrent-fragments", "4")
-                .addOption(
-                    "-o",
-                    File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
-                )
-                .addOption("--print", "after_move:%(filepath)s")
+            var previousBytes = directoryBytes(jobDir)
+            var previousAt = System.currentTimeMillis()
+            var maxProgress = 0f
 
-            val response = YoutubeDL.getInstance().execute(
-                request = request,
-                processId = processId,
-                callback = { callbackProgress, callbackEta, line ->
-                    val now = System.currentTimeMillis()
-                    if (now - lastHistoryUpdateAt < 450L && callbackProgress < 100f) {
-                        return@execute
-                    }
+            monitorJob = scope.launch {
+                while (true) {
+                    delay(500L)
 
                     val bytes = directoryBytes(jobDir)
-                    val elapsedMs = (now - lastSampleAt).coerceAtLeast(1L)
-                    val sampledSpeed = if (bytes >= lastSampleBytes) {
-                        ((bytes - lastSampleBytes) * 1000L) / elapsedMs
+                    val now = System.currentTimeMillis()
+                    val elapsedMs = (now - previousAt).coerceAtLeast(1L)
+                    val sampledSpeed = if (bytes >= previousBytes) {
+                        ((bytes - previousBytes) * 1000L) / elapsedMs
                     } else {
                         0L
                     }
-                    val parsedSpeed = ProgressLineParser.speedBytesPerSecond(line)
-                    val speed = parsedSpeed ?: sampledSpeed
 
-                    val computedProgress = if (estimatedBytes != null && estimatedBytes > 0L) {
-                        ((bytes.toDouble() / estimatedBytes.toDouble()) * 100.0)
-                            .toFloat()
-                            .coerceIn(0f, 99f)
+                    val stage = currentStage.get()
+                    val parsedSpeed = rawSpeed.get().takeIf { it > 0L }
+                    val speed = if (stage == "Merging" || stage == "Finalizing") {
+                        0L
                     } else {
-                        callbackProgress.coerceIn(0f, 99f)
+                        parsedSpeed ?: sampledSpeed
                     }
-                    maxProgress = max(maxProgress, computedProgress)
+
+                    val estimatedProgress = estimatedBytes
+                        ?.takeIf { it > 0L }
+                        ?.let {
+                            ((bytes.toDouble() / it.toDouble()) * 100.0)
+                                .toFloat()
+                                .coerceIn(0f, 99f)
+                        }
+
+                    val parsedProgress = rawPercent.get()?.coerceIn(0f, 99f)
+                    val candidateProgress = estimatedProgress ?: parsedProgress ?: maxProgress
+                    maxProgress = max(maxProgress, candidateProgress)
 
                     val eta = when {
-                        estimatedBytes != null && speed > 0L && bytes < estimatedBytes ->
+                        stage == "Merging" || stage == "Finalizing" -> null
+                        estimatedBytes != null &&
+                            estimatedBytes > bytes &&
+                            speed > 0L ->
                             ((estimatedBytes - bytes) / speed).coerceAtLeast(0L)
-                        callbackEta >= 0L -> callbackEta
+                        rawEta.get() >= 0L -> rawEta.get()
                         else -> null
                     }
 
-                    val stage = if (
-                        line?.contains("[Merger]", ignoreCase = true) == true ||
-                        line?.contains("Merging formats", ignoreCase = true) == true
-                    ) {
-                        "Merging"
-                    } else {
-                        "Downloading"
-                    }
-
-                    HistoryStore(this).update(jobId) {
+                    HistoryStore(this@DownloadService).update(jobId) {
                         it.copy(
                             status = DownloadStatus.DOWNLOADING,
                             stage = stage,
@@ -211,27 +212,77 @@ class DownloadService : Service() {
                         )
                     }
                     broadcastHistoryChange(jobId)
+
                     notifySafely(
                         PROGRESS_NOTIFICATION_ID,
                         progressNotification(
-                            jobId,
-                            title,
-                            maxProgress.roundToInt(),
-                            speed,
-                            eta
+                            jobId = jobId,
+                            title = title,
+                            progress = maxProgress.roundToInt(),
+                            speed = speed,
+                            etaSeconds = eta,
+                            determinate = estimatedBytes != null || parsedProgress != null
                         )
                     )
 
-                    lastHistoryUpdateAt = now
-                    lastSampleAt = now
-                    lastSampleBytes = bytes
+                    previousBytes = bytes
+                    previousAt = now
+                }
+            }
+
+            val request = YoutubeDLRequest(url)
+                .addOption("--no-playlist")
+                .addOption("-f", selector)
+                .addOption("--merge-output-format", "mp4/mkv")
+                .addOption("--newline")
+                .addOption("--concurrent-fragments", "4")
+                .addOption(
+                    "--progress-template",
+                    "download:[download] %(progress._percent_str)s of %(progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s"
+                )
+                .addOption(
+                    "-o",
+                    File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
+                )
+                .addOption("--print", "after_move:%(filepath)s")
+
+            val response = YoutubeDL.getInstance().execute(
+                request = request,
+                processId = processId,
+                callback = { callbackProgress, callbackEta, line ->
+                    ProgressLineParser.percent(line)
+                        ?.let { rawPercent.set(it) }
+                        ?: callbackProgress
+                            .takeIf { it >= 0f }
+                            ?.let { rawPercent.set(it) }
+
+                    ProgressLineParser.speedBytesPerSecond(line)
+                        ?.let { rawSpeed.set(it) }
+
+                    ProgressLineParser.etaSeconds(line)
+                        ?.let { rawEta.set(it) }
+                        ?: callbackEta
+                            .takeIf { it >= 0L }
+                            ?.let { rawEta.set(it) }
+
+                    if (ProgressLineParser.isMerging(line)) {
+                        currentStage.set("Merging")
+                        rawSpeed.set(-1L)
+                        rawEta.set(-1L)
+                    } else if (line?.contains("[download]", ignoreCase = true) == true) {
+                        currentStage.set("Downloading")
+                    }
                 }
             )
+
+            currentStage.set("Finalizing")
+            rawSpeed.set(-1L)
+            rawEta.set(-1L)
 
             HistoryStore(this).update(jobId) {
                 it.copy(
                     stage = "Finalizing",
-                    progress = max(maxProgress, 99f),
+                    progress = max(it.progress, 99f),
                     speedBytesPerSecond = 0L,
                     etaSeconds = null
                 )
@@ -295,7 +346,10 @@ class DownloadService : Service() {
         } catch (t: Throwable) {
             val alreadyCancelled =
                 HistoryStore(this).find(jobId)?.status == DownloadStatus.CANCELLED
-            val cancelled = t is CancellationException || alreadyCancelled
+            val cancelled =
+                t is CancellationException ||
+                    t is YoutubeDL.CanceledException ||
+                    alreadyCancelled
             val humanError = if (cancelled) null else ProgressLineParser.humanError(t.message)
 
             HistoryStore(this).update(jobId) {
@@ -317,10 +371,18 @@ class DownloadService : Service() {
                 )
             }
         } finally {
-            if (completed || HistoryStore(this).find(jobId)?.status != DownloadStatus.DOWNLOADING) {
+            monitorJob?.cancel()
+
+            if (
+                completed ||
+                HistoryStore(this).find(jobId)?.status != DownloadStatus.DOWNLOADING
+            ) {
                 runCatching { jobDir.deleteRecursively() }
-                if (partialRoot.listFiles().isNullOrEmpty()) runCatching { partialRoot.delete() }
+                if (partialRoot.listFiles().isNullOrEmpty()) {
+                    runCatching { partialRoot.delete() }
+                }
             }
+
             activeProcessId = null
             activeHistoryId = null
             activeJob = null
@@ -340,7 +402,8 @@ class DownloadService : Service() {
         title: String,
         progress: Int,
         speed: Long,
-        etaSeconds: Long?
+        etaSeconds: Long?,
+        determinate: Boolean
     ): android.app.Notification {
         val cancelIntent = Intent(this, DownloadService::class.java).setAction(ACTION_CANCEL)
         val cancelPending = PendingIntent.getService(
@@ -349,6 +412,7 @@ class DownloadService : Service() {
             cancelIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
         val openIntent = Intent(this, MainActivity::class.java)
             .putExtra(MainActivity.EXTRA_OPEN_JOB_ID, jobId)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -360,13 +424,19 @@ class DownloadService : Service() {
         )
 
         val details = buildString {
-            append(progress)
-            append("%")
+            if (determinate) {
+                append(progress.coerceIn(0, 99))
+                append("%")
+            } else {
+                append("Downloading")
+            }
+
             if (speed > 0L) {
                 append(" • ")
                 append(FileSizeFormatter.format(speed))
                 append("/s")
             }
+
             if (etaSeconds != null && etaSeconds >= 0L) {
                 append(" • ")
                 append(formatEta(etaSeconds))
@@ -381,7 +451,11 @@ class DownloadService : Service() {
             .setContentIntent(openPending)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
-            .setProgress(100, progress.coerceIn(0, 100), false)
+            .setProgress(
+                100,
+                progress.coerceIn(0, 99),
+                !determinate
+            )
             .addAction(0, "Cancel", cancelPending)
             .build()
     }
@@ -413,7 +487,10 @@ class DownloadService : Service() {
             .build()
     }
 
-    private fun failedNotification(title: String, message: String): android.app.Notification {
+    private fun failedNotification(
+        title: String,
+        message: String
+    ): android.app.Notification {
         val openApp = PendingIntent.getActivity(
             this,
             30,
@@ -431,7 +508,10 @@ class DownloadService : Service() {
             .build()
     }
 
-    private fun notifySafely(id: Int, notification: android.app.Notification) {
+    private fun notifySafely(
+        id: Int,
+        notification: android.app.Notification
+    ) {
         val allowed =
             Build.VERSION.SDK_INT < 33 ||
                 ContextCompat.checkSelfPermission(
@@ -444,7 +524,7 @@ class DownloadService : Service() {
         try {
             NotificationManagerCompat.from(this).notify(id, notification)
         } catch (_: SecurityException) {
-            // Notification access can be revoked between the permission check and posting.
+            // Notification access can be revoked between check and post.
         }
     }
 
@@ -455,12 +535,17 @@ class DownloadService : Service() {
 
     private fun formatEta(seconds: Long): String {
         val safe = seconds.coerceAtLeast(0L)
-        val minutes = safe / 60L
+        val hours = safe / 3600L
+        val minutes = (safe % 3600L) / 60L
         val remainingSeconds = safe % 60L
-        return if (minutes > 0L) {
-            minutes.toString() + "m " + remainingSeconds.toString() + "s"
-        } else {
-            remainingSeconds.toString() + "s"
+
+        return when {
+            hours > 0L ->
+                hours.toString() + "h " + minutes.toString() + "m"
+            minutes > 0L ->
+                minutes.toString() + "m " + remainingSeconds.toString() + "s"
+            else ->
+                remainingSeconds.toString() + "s"
         }
     }
 
@@ -507,6 +592,7 @@ class DownloadService : Service() {
     companion object {
         const val ACTION_HISTORY_CHANGED = "com.apoorv.yrb.HISTORY_CHANGED"
         const val EXTRA_CHANGED_JOB_ID = "changed_job_id"
+
         private const val ACTION_CANCEL = "com.apoorv.yrb.CANCEL"
         private const val EXTRA_JOB_ID = "job_id"
         private const val EXTRA_URL = "url"
