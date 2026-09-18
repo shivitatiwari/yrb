@@ -556,7 +556,7 @@ class DownloadService : Service() {
             request.addOption("--cookies", cookieFile.absolutePath)
         }
         sessionStore.userAgentOrNull()?.let { userAgent ->
-            request.addOption("--user-agent", userAgent)
+            request.addOption("--add-header", "User-Agent:" + userAgent)
         }
 
         return YoutubeDL.getInstance().execute(
