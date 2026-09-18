@@ -10,6 +10,7 @@ data class DownloadRecord(
     val title: String,
     val url: String,
     val quality: Int,
+    val audioLanguage: String? = null,
     val filePath: String? = null,
     val status: String,
     val stage: String = status,
@@ -101,6 +102,7 @@ class HistoryStore(context: Context) {
                             title = item.optString("title", "Video"),
                             url = item.optString("url"),
                             quality = item.optInt("quality"),
+                            audioLanguage = item.optString("audioLanguage").takeIf { it.isNotBlank() },
                             filePath = item.optString("filePath", item.optString("path"))
                                 .takeIf { it.isNotBlank() },
                             status = item.optString("status", DownloadStatus.FAILED),
@@ -132,6 +134,7 @@ class HistoryStore(context: Context) {
                     .put("title", item.title)
                     .put("url", item.url)
                     .put("quality", item.quality)
+                    .put("audioLanguage", item.audioLanguage ?: "")
                     .put("filePath", item.filePath ?: "")
                     .put("status", item.status)
                     .put("stage", item.stage)
