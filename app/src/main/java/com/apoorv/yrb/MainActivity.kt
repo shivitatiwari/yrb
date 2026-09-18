@@ -332,6 +332,109 @@ class MainActivity : ComponentActivity() {
             }
 
             item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    color = if (sessionStatus.connected) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                    }
+                ) {
+                    if (sessionStatus.connected) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "YouTube connected",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "Downloads use this session automatically.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    sessionLoginLauncher.launch(
+                                        Intent(
+                                            this@MainActivity,
+                                            YouTubeLoginActivity::class.java
+                                        )
+                                    )
+                                }
+                            ) {
+                                Text("Refresh")
+                            }
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                "Connect YouTube",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Sign in once inside Yrb before downloading. This keeps the download controls simple afterwards.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            FilledTonalButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    sessionLoginLauncher.launch(
+                                        Intent(
+                                            this@MainActivity,
+                                            YouTubeLoginActivity::class.java
+                                        )
+                                    )
+                                }
+                            ) {
+                                Text("Sign in to YouTube")
+                            }
+                            TextButton(
+                                onClick = {
+                                    sessionLauncher.launch(
+                                        arrayOf(
+                                            "text/plain",
+                                            "text/*",
+                                            "application/octet-stream"
+                                        )
+                                    )
+                                }
+                            ) {
+                                Text("Advanced: import cookies.txt")
+                            }
+                        }
+                    }
+                }
+            }
+
+            sessionNotice?.let { notice ->
+                item {
+                    Text(
+                        notice,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            item {
                 ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(18.dp),
@@ -384,114 +487,6 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             Text(if (loading) "Checking…" else "Inspect video")
-                        }
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    color = if (sessionStatus.connected) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
-                    }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (sessionStatus.connected) {
-                                Icon(
-                                    Icons.Rounded.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "YouTube session",
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    if (sessionStatus.connected) {
-                                        "Connected • stored only on this device"
-                                    } else {
-                                        "Connect once inside Yrb. Your password stays in Google's page; Yrb stores only the local YouTube session."
-                                    },
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilledTonalButton(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = {
-                                    sessionLoginLauncher.launch(
-                                        Intent(
-                                            this@MainActivity,
-                                            YouTubeLoginActivity::class.java
-                                        )
-                                    )
-                                }
-                            ) {
-                                Text(
-                                    if (sessionStatus.connected) {
-                                        "Refresh YouTube sign-in"
-                                    } else {
-                                        "Sign in to YouTube"
-                                    }
-                                )
-                            }
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        sessionLauncher.launch(
-                                            arrayOf(
-                                                "text/plain",
-                                                "text/*",
-                                                "application/octet-stream"
-                                            )
-                                        )
-                                    }
-                                ) {
-                                    Text("Import cookies.txt")
-                                }
-
-                                if (sessionStatus.connected) {
-                                    TextButton(
-                                        onClick = {
-                                            sessionStore.clear()
-                                            sessionStatus = sessionStore.status()
-                                            sessionNotice = "YouTube session removed."
-                                        }
-                                    ) {
-                                        Text("Remove")
-                                    }
-                                }
-                            }
-                        }
-
-                        sessionNotice?.let { notice ->
-                            Text(
-                                notice,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
-                            )
                         }
                     }
                 }
