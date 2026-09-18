@@ -21,6 +21,7 @@ import com.apoorv.yrb.data.DownloadStatus
 import com.apoorv.yrb.data.HistoryStore
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.yausername.youtubedl_android.YoutubeDLResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,13 @@ class DownloadService : Service() {
     private var activeJob: Job? = null
     private var activeProcessId: String? = null
     private var activeHistoryId: String? = null
+
+    private class AttemptTelemetry {
+        val rawPercent = AtomicReference<Float?>(null)
+        val rawSpeed = AtomicLong(-1L)
+        val rawEta = AtomicLong(-1L)
+        val stage = AtomicReference("Downloading")
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -77,6 +85,8 @@ class DownloadService : Service() {
         val selector = intent.getStringExtra(EXTRA_SELECTOR) ?: return START_NOT_STICKY
         val extractorArgs = intent.getStringExtra(EXTRA_EXTRACTOR_ARGS)
         val forceIpv4 = intent.getBooleanExtra(EXTRA_FORCE_IPV4, false)
+        val clientKey = intent.getStringExtra(EXTRA_CLIENT_KEY) ?: "default"
+        val audioLanguageId = intent.getStringExtra(EXTRA_AUDIO_LANGUAGE_ID) ?: "default"
         val estimatedBytes = intent.getLongExtra(EXTRA_ESTIMATED_BYTES, -1L).takeIf { it > 0L }
 
         if (quality !in QualitySelector.supported) return START_NOT_STICKY
@@ -117,6 +127,8 @@ class DownloadService : Service() {
                 selector = selector,
                 extractorArgs = extractorArgs,
                 forceIpv4 = forceIpv4,
+                clientKey = clientKey,
+                audioLanguageId = audioLanguageId,
                 estimatedBytes = estimatedBytes,
                 processId = processId,
                 startId = startId
@@ -133,6 +145,8 @@ class DownloadService : Service() {
         selector: String,
         extractorArgs: String?,
         forceIpv4: Boolean,
+        clientKey: String,
+        audioLanguageId: String,
         estimatedBytes: Long?,
         processId: String,
         startId: Int
@@ -147,162 +161,155 @@ class DownloadService : Service() {
         jobDir.mkdirs()
 
         var completed = false
-        var monitorJob: Job? = null
-
-        val rawPercent = AtomicReference<Float?>(null)
-        val rawSpeed = AtomicLong(-1L)
-        val rawEta = AtomicLong(-1L)
-        val currentStage = AtomicReference("Downloading")
 
         try {
-            HistoryStore(this).update(jobId) {
-                it.copy(stage = "Downloading")
-            }
-            broadcastHistoryChange(jobId)
-
-            var previousBytes = directoryBytes(jobDir)
-            var previousAt = System.currentTimeMillis()
-            var maxProgress = 0f
-
-            monitorJob = scope.launch {
-                while (true) {
-                    delay(500L)
-
-                    val bytes = directoryBytes(jobDir)
-                    val now = System.currentTimeMillis()
-                    val elapsedMs = (now - previousAt).coerceAtLeast(1L)
-                    val sampledSpeed = if (bytes >= previousBytes) {
-                        ((bytes - previousBytes) * 1000L) / elapsedMs
-                    } else {
-                        0L
-                    }
-
-                    val stage = currentStage.get()
-                    val parsedSpeed = rawSpeed.get().takeIf { it > 0L }
-                    val speed = if (stage == "Merging" || stage == "Finalizing") {
-                        0L
-                    } else {
-                        parsedSpeed ?: sampledSpeed
-                    }
-
-                    val estimatedProgress = estimatedBytes
-                        ?.takeIf { it > 0L }
-                        ?.let {
-                            ((bytes.toDouble() / it.toDouble()) * 100.0)
-                                .toFloat()
-                                .coerceIn(0f, 99f)
-                        }
-
-                    val parsedProgress = rawPercent.get()?.coerceIn(0f, 99f)
-                    val candidateProgress = estimatedProgress ?: parsedProgress ?: maxProgress
-                    maxProgress = max(maxProgress, candidateProgress)
-
-                    val eta = when {
-                        stage == "Merging" || stage == "Finalizing" -> null
-                        estimatedBytes != null &&
-                            estimatedBytes > bytes &&
-                            speed > 0L ->
-                            ((estimatedBytes - bytes) / speed).coerceAtLeast(0L)
-                        rawEta.get() >= 0L -> rawEta.get()
-                        else -> null
-                    }
-
-                    HistoryStore(this@DownloadService).update(jobId) {
-                        it.copy(
-                            status = DownloadStatus.DOWNLOADING,
-                            stage = stage,
-                            progress = maxProgress,
-                            speedBytesPerSecond = speed,
-                            etaSeconds = eta,
-                            downloadedBytes = bytes
-                        )
-                    }
-                    broadcastHistoryChange(jobId)
-
-                    notifySafely(
-                        PROGRESS_NOTIFICATION_ID,
-                        progressNotification(
-                            jobId = jobId,
-                            title = title,
-                            progress = maxProgress.roundToInt(),
-                            speed = speed,
-                            etaSeconds = eta,
-                            determinate = estimatedBytes != null || parsedProgress != null
-                        )
-                    )
-
-                    previousBytes = bytes
-                    previousAt = now
-                }
-            }
-
-            val request = YoutubeDLRequest(url)
-                .addOption("--no-playlist")
-                .addOption("-f", selector)
-                .addOption("--merge-output-format", "mp4/mkv")
-                .addOption("--newline")
-                .addOption("--concurrent-fragments", "4")
-                .addOption(
-                    "--progress-template",
-                    "download:[download] %(progress._percent_str)s of %(progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s"
-                )
-                .addOption(
-                    "-o",
-                    File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
-                )
-                .addOption("--print", "after_move:%(filepath)s")
-
-            extractorArgs?.let {
-                request.addOption("--extractor-args", it)
-            }
-            if (forceIpv4) {
-                request.addOption("--force-ipv4")
-            }
-
-            val response = YoutubeDL.getInstance().execute(
-                request = request,
-                processId = processId,
-                callback = { callbackProgress, callbackEta, line ->
-                    ProgressLineParser.percent(line)
-                        ?.let { rawPercent.set(it) }
-                        ?: callbackProgress
-                            .takeIf { it >= 0f }
-                            ?.let { rawPercent.set(it) }
-
-                    ProgressLineParser.speedBytesPerSecond(line)
-                        ?.let { rawSpeed.set(it) }
-
-                    ProgressLineParser.etaSeconds(line)
-                        ?.let { rawEta.set(it) }
-                        ?: callbackEta
-                            .takeIf { it >= 0L }
-                            ?.let { rawEta.set(it) }
-
-                    if (ProgressLineParser.isMerging(line)) {
-                        currentStage.set("Merging")
-                        rawSpeed.set(-1L)
-                        rawEta.set(-1L)
-                    } else if (line?.contains("[download]", ignoreCase = true) == true) {
-                        currentStage.set("Downloading")
-                    }
-                }
+            val initialOption = QualityOption(
+                height = quality,
+                selector = selector,
+                estimatedBytes = estimatedBytes,
+                approximate = true,
+                extractorArgs = extractorArgs,
+                forceIpv4 = forceIpv4,
+                clientKey = clientKey,
+                audioLanguageId = audioLanguageId
             )
 
-            currentStage.set("Finalizing")
-            rawSpeed.set(-1L)
-            rawEta.set(-1L)
+            val attempts = mutableListOf(initialOption)
+            val seenAttempts = mutableSetOf(
+                initialOption.clientKey + "|" + initialOption.selector
+            )
+
+            var recoveryLoaded = false
+            var attemptIndex = 0
+            var response: YoutubeDLResponse? = null
+            var successfulOption = initialOption
+            var lastError: Throwable? = null
+
+            while (attemptIndex < attempts.size) {
+                val option = attempts[attemptIndex]
+                val attemptProcessId = processId + "-" + attemptIndex
+                activeProcessId = attemptProcessId
+
+                runCatching { jobDir.deleteRecursively() }
+                jobDir.mkdirs()
+
+                val stage = if (attemptIndex == 0) {
+                    "Downloading"
+                } else {
+                    "Retrying • " + routeLabel(option.clientKey)
+                }
+
+                HistoryStore(this).update(jobId) {
+                    it.copy(
+                        status = DownloadStatus.DOWNLOADING,
+                        stage = stage,
+                        progress = 0f,
+                        speedBytesPerSecond = 0L,
+                        etaSeconds = null,
+                        estimatedBytes = option.estimatedBytes ?: it.estimatedBytes,
+                        downloadedBytes = 0L,
+                        error = null
+                    )
+                }
+                broadcastHistoryChange(jobId)
+
+                val telemetry = AttemptTelemetry().also {
+                    it.stage.set(stage)
+                }
+                val monitorJob = startAttemptMonitor(
+                    jobId = jobId,
+                    title = title,
+                    jobDir = jobDir,
+                    estimatedBytes = option.estimatedBytes ?: estimatedBytes,
+                    telemetry = telemetry
+                )
+
+                try {
+                    response = executeDownloadAttempt(
+                        url = url,
+                        option = option,
+                        jobDir = jobDir,
+                        processId = attemptProcessId,
+                        telemetry = telemetry
+                    )
+                    monitorJob.cancel()
+                    monitorJob.join()
+                    successfulOption = option
+                    break
+                } catch (t: Throwable) {
+                    monitorJob.cancel()
+                    monitorJob.join()
+
+                    val alreadyCancelled =
+                        HistoryStore(this).find(jobId)?.status == DownloadStatus.CANCELLED
+                    val cancelled =
+                        t is CancellationException ||
+                            t is YoutubeDL.CanceledException ||
+                            alreadyCancelled
+
+                    if (cancelled) throw t
+
+                    lastError = t
+                    if (!YtDlpClient.isRecoverableDownloadError(t)) {
+                        throw t
+                    }
+
+                    if (!recoveryLoaded) {
+                        HistoryStore(this).update(jobId) {
+                            it.copy(
+                                stage = "Switching playback route",
+                                progress = 0f,
+                                speedBytesPerSecond = 0L,
+                                etaSeconds = null,
+                                downloadedBytes = 0L,
+                                error = null
+                            )
+                        }
+                        broadcastHistoryChange(jobId)
+
+                        val recovered = YtDlpClient.recoveryCandidates(
+                            context = this,
+                            url = url,
+                            height = quality,
+                            audioLanguageId = audioLanguageId,
+                            currentClientKey = option.clientKey
+                        )
+
+                        recovered.forEach { candidate ->
+                            val key = candidate.clientKey + "|" + candidate.selector
+                            if (seenAttempts.add(key)) attempts.add(candidate)
+                        }
+                        recoveryLoaded = true
+                    }
+
+                    if (attemptIndex + 1 >= attempts.size) {
+                        throw IllegalStateException(
+                            "YouTube rejected every anonymous playback route (HTTP 403). " +
+                                "This video currently requires a valid PO token or authenticated session.",
+                            t
+                        )
+                    }
+
+                    attemptIndex++
+                }
+            }
+
+            val successfulResponse = response ?: throw (
+                lastError ?: IllegalStateException("No download route completed.")
+            )
 
             HistoryStore(this).update(jobId) {
                 it.copy(
                     stage = "Finalizing",
                     progress = max(it.progress, 99f),
                     speedBytesPerSecond = 0L,
-                    etaSeconds = null
+                    etaSeconds = null,
+                    estimatedBytes = successfulOption.estimatedBytes ?: it.estimatedBytes
                 )
             }
             broadcastHistoryChange(jobId)
 
-            val printedPath = response.out
+            val printedPath = successfulResponse.out
                 .lineSequence()
                 .map { it.trim() }
                 .lastOrNull { it.startsWith(jobDir.absolutePath) }
@@ -363,7 +370,11 @@ class DownloadService : Service() {
                 t is CancellationException ||
                     t is YoutubeDL.CanceledException ||
                     alreadyCancelled
-            val humanError = if (cancelled) null else ProgressLineParser.humanError(t.message)
+
+            val humanError = when {
+                cancelled -> null
+                else -> ProgressLineParser.humanError(t.message)
+            }
 
             HistoryStore(this).update(jobId) {
                 it.copy(
@@ -384,8 +395,6 @@ class DownloadService : Service() {
                 )
             }
         } finally {
-            monitorJob?.cancel()
-
             if (
                 completed ||
                 HistoryStore(this).find(jobId)?.status != DownloadStatus.DOWNLOADING
@@ -402,6 +411,167 @@ class DownloadService : Service() {
             stopSelf(startId)
         }
     }
+
+    private fun startAttemptMonitor(
+        jobId: String,
+        title: String,
+        jobDir: File,
+        estimatedBytes: Long?,
+        telemetry: AttemptTelemetry
+    ): Job = scope.launch {
+        var previousBytes = directoryBytes(jobDir)
+        var previousAt = System.currentTimeMillis()
+        var maxProgress = 0f
+
+        while (true) {
+            delay(500L)
+
+            val bytes = directoryBytes(jobDir)
+            val now = System.currentTimeMillis()
+            val elapsedMs = (now - previousAt).coerceAtLeast(1L)
+            val sampledSpeed = if (bytes >= previousBytes) {
+                ((bytes - previousBytes) * 1000L) / elapsedMs
+            } else {
+                0L
+            }
+
+            val stage = telemetry.stage.get()
+            val parsedSpeed = telemetry.rawSpeed.get().takeIf { it > 0L }
+            val speed = if (
+                stage == "Merging" ||
+                stage == "Finalizing" ||
+                stage.startsWith("Switching")
+            ) {
+                0L
+            } else {
+                parsedSpeed ?: sampledSpeed
+            }
+
+            val estimatedProgress = estimatedBytes
+                ?.takeIf { it > 0L }
+                ?.let {
+                    ((bytes.toDouble() / it.toDouble()) * 100.0)
+                        .toFloat()
+                        .coerceIn(0f, 99f)
+                }
+
+            val parsedProgress = telemetry.rawPercent.get()?.coerceIn(0f, 99f)
+            val candidateProgress =
+                estimatedProgress ?: parsedProgress ?: maxProgress
+            maxProgress = max(maxProgress, candidateProgress)
+
+            val eta = when {
+                stage == "Merging" || stage == "Finalizing" -> null
+                estimatedBytes != null &&
+                    estimatedBytes > bytes &&
+                    speed > 0L ->
+                    ((estimatedBytes - bytes) / speed).coerceAtLeast(0L)
+                telemetry.rawEta.get() >= 0L -> telemetry.rawEta.get()
+                else -> null
+            }
+
+            HistoryStore(this@DownloadService).update(jobId) {
+                it.copy(
+                    status = DownloadStatus.DOWNLOADING,
+                    stage = stage,
+                    progress = maxProgress,
+                    speedBytesPerSecond = speed,
+                    etaSeconds = eta,
+                    downloadedBytes = bytes
+                )
+            }
+            broadcastHistoryChange(jobId)
+
+            notifySafely(
+                PROGRESS_NOTIFICATION_ID,
+                progressNotification(
+                    jobId = jobId,
+                    title = title,
+                    progress = maxProgress.roundToInt(),
+                    speed = speed,
+                    etaSeconds = eta,
+                    determinate = estimatedBytes != null || parsedProgress != null
+                )
+            )
+
+            previousBytes = bytes
+            previousAt = now
+        }
+    }
+
+    private fun executeDownloadAttempt(
+        url: String,
+        option: QualityOption,
+        jobDir: File,
+        processId: String,
+        telemetry: AttemptTelemetry
+    ): YoutubeDLResponse {
+        val request = YoutubeDLRequest(url)
+            .addOption("--no-playlist")
+            .addOption("-f", option.selector)
+            .addOption("--merge-output-format", "mp4/mkv")
+            .addOption("--newline")
+            .addOption("--concurrent-fragments", "4")
+            .addOption("--retries", "2")
+            .addOption("--fragment-retries", "2")
+            .addOption("--retry-sleep", "http:1")
+            .addOption("--retry-sleep", "fragment:exp=1:4")
+            .addOption(
+                "--progress-template",
+                "download:[download] %(progress._percent_str)s of %(progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s"
+            )
+            .addOption(
+                "-o",
+                File(jobDir, "%(title).180B [%(id)s].%(ext)s").absolutePath
+            )
+            .addOption("--print", "after_move:%(filepath)s")
+
+        option.extractorArgs?.let {
+            request.addOption("--extractor-args", it)
+        }
+        if (option.forceIpv4) {
+            request.addOption("--force-ipv4")
+        }
+
+        return YoutubeDL.getInstance().execute(
+            request = request,
+            processId = processId,
+            callback = { callbackProgress, callbackEta, line ->
+                ProgressLineParser.percent(line)
+                    ?.let { telemetry.rawPercent.set(it) }
+                    ?: callbackProgress
+                        .takeIf { it >= 0f }
+                        ?.let { telemetry.rawPercent.set(it) }
+
+                ProgressLineParser.speedBytesPerSecond(line)
+                    ?.let { telemetry.rawSpeed.set(it) }
+
+                ProgressLineParser.etaSeconds(line)
+                    ?.let { telemetry.rawEta.set(it) }
+                    ?: callbackEta
+                        .takeIf { it >= 0L }
+                        ?.let { telemetry.rawEta.set(it) }
+
+                if (ProgressLineParser.isMerging(line)) {
+                    telemetry.stage.set("Merging")
+                    telemetry.rawSpeed.set(-1L)
+                    telemetry.rawEta.set(-1L)
+                } else if (line?.contains("[download]", ignoreCase = true) == true) {
+                    if (!telemetry.stage.get().startsWith("Retrying")) {
+                        telemetry.stage.set("Downloading")
+                    }
+                }
+            }
+        )
+    }
+
+    private fun routeLabel(clientKey: String): String =
+        when (clientKey) {
+            "ipv4" -> "IPv4"
+            "web_safari_hls" -> "Safari HLS"
+            "web_embedded" -> "Embedded"
+            else -> "Default"
+        }
 
     private fun directoryBytes(dir: File): Long =
         runCatching {
@@ -614,6 +784,8 @@ class DownloadService : Service() {
         private const val EXTRA_SELECTOR = "selector"
         private const val EXTRA_EXTRACTOR_ARGS = "extractor_args"
         private const val EXTRA_FORCE_IPV4 = "force_ipv4"
+        private const val EXTRA_CLIENT_KEY = "client_key"
+        private const val EXTRA_AUDIO_LANGUAGE_ID = "audio_language_id"
         private const val EXTRA_ESTIMATED_BYTES = "estimated_bytes"
         private const val CHANNEL_DOWNLOADS = "downloads"
         private const val CHANNEL_RESULTS = "download_results"
@@ -636,6 +808,8 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_SELECTOR, quality.selector)
                 .putExtra(EXTRA_EXTRACTOR_ARGS, quality.extractorArgs)
                 .putExtra(EXTRA_FORCE_IPV4, quality.forceIpv4)
+                .putExtra(EXTRA_CLIENT_KEY, quality.clientKey)
+                .putExtra(EXTRA_AUDIO_LANGUAGE_ID, quality.audioLanguageId)
                 .putExtra(EXTRA_ESTIMATED_BYTES, quality.estimatedBytes ?: -1L)
 
         fun cancelIntent(context: android.content.Context): Intent =
