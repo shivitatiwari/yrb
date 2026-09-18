@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Environment
 import android.util.Log
 import com.apoorv.yrb.data.HistoryStore
+import com.apoorv.yrb.download.SessionStore
 import com.apoorv.yrb.download.YtDlpRuntime
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
@@ -21,6 +22,7 @@ class YrbApplication : Application() {
             FFmpeg.getInstance().init(this)
 
             Thread {
+                SessionStore(this).refreshFromWebViewDatabaseIfAvailable()
                 YtDlpRuntime.refreshIfDue(this)
             }.start()
         } catch (t: Throwable) {
