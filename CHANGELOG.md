@@ -2,6 +2,8 @@
 
 ## 1.2.0
 
+Release verification: unit tests, Android lint, APK build and AAB build passed in GitHub Actions.
+
 Released: 2026-09-18
 
 - Keep yt-dlp update checks off the normal metadata-fetch path.
