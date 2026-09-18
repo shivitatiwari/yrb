@@ -63,6 +63,14 @@ object YtDlpClient {
                     val format = formats.optJSONObject(i) ?: continue
                     val id = format.optString("format_id").trim()
                     if (id.isBlank()) continue
+                    if (format.optBoolean("has_drm", false)) continue
+
+                    val url = format.optString("url").trim()
+                    val manifestUrl = format.optString("manifest_url").trim()
+                    if (url.isBlank() && manifestUrl.isBlank()) continue
+
+                    val rawVideoCodec = format.optString("vcodec")
+                    if (rawVideoCodec.equals("images", ignoreCase = true)) continue
 
                     val height = format.optInt("height", -1).takeIf { it > 0 }
                     val filesize = format.optLong("filesize", -1L).takeIf { it > 0 }
@@ -72,7 +80,7 @@ object YtDlpClient {
                             id = id,
                             height = height,
                             ext = format.optString("ext"),
-                            vcodec = format.optString("vcodec"),
+                            vcodec = rawVideoCodec,
                             acodec = format.optString("acodec"),
                             bitrate = format.optDouble("tbr", format.optDouble("abr", 0.0)),
                             size = filesize ?: approx,
