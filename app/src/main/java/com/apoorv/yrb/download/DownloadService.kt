@@ -238,7 +238,7 @@ class DownloadService : Service() {
 
                     val attemptFile = findCompletedMediaFile(jobDir, attemptResponse)
                     if (attemptFile == null || attemptFile.length() <= 0L) {
-                        throw IllegalStateException("The downloaded file is empty.")
+                        throw IllegalStateException("unable to download video data: empty output")
                     }
 
                     response = attemptResponse
@@ -323,7 +323,7 @@ class DownloadService : Service() {
                 ?: error("yt-dlp finished but the completed media file could not be located.")
 
             if (sourceFile.length() <= 0L) {
-                error("The downloaded file is empty.")
+                error("unable to download video data: empty output")
             }
 
             val finalFile = File(rootDir, sourceFile.name)
