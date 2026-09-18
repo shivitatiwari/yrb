@@ -47,7 +47,7 @@ class HistoryStore(context: Context) {
         val current = readAll().toMutableList()
         current.removeAll { it.id == entry.id }
         current.add(0, entry)
-        while (current.size > 100) current.removeLast()
+        while (current.size > 100) current.removeAt(current.lastIndex)
 
         val array = JSONArray()
         current.forEach { item ->
