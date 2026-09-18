@@ -43,6 +43,17 @@ class QualitySelectorTest {
     }
 
     @Test
+    fun detectsAuthenticatedYouTubeSessionCookies() {
+        val text = """
+            # Netscape HTTP Cookie File
+            .youtube.com	TRUE	/	TRUE	0	SAPISID	redacted
+            .youtube.com	TRUE	/	TRUE	0	YSC	visitor
+        """.trimIndent()
+
+        assertTrue(SessionCookieValidator.looksAuthenticated(text))
+    }
+
+    @Test
     fun rejectsCookieFilesWithoutYouTubeOrGoogleSession() {
         val text = """
             # Netscape HTTP Cookie File
