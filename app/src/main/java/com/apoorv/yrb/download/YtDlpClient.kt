@@ -129,14 +129,14 @@ object YtDlpClient {
             cache.remove(normalized)
         }
 
-        val firstPass = tryModes(normalized, anonymousModes)
+        val firstPass = tryModes(context, normalized, anonymousModes)
         val inspection = firstPass.getOrElse { firstError ->
             if (!shouldTryRecovery(firstError)) throw firstError
 
             // YouTube changes frequently. Refresh yt-dlp only after the fast path fails,
             // then repeat the documented anonymous client fallbacks.
             YtDlpRuntime.refreshIfDue(context, force = true)
-            tryModes(normalized, anonymousModes).getOrElse { finalError ->
+            tryModes(context, normalized, anonymousModes).getOrElse { finalError ->
                 throw IllegalStateException(
                     friendlyAnonymousFailure(finalError),
                     finalError
@@ -149,13 +149,14 @@ object YtDlpClient {
     }
 
     private fun tryModes(
+        context: Context,
         url: String,
         modes: List<InspectionMode>
     ): Result<VideoInspection> {
         var lastError: Throwable? = null
 
         for (mode in modes) {
-            val result = runCatching { inspectOnce(url, mode) }
+            val result = runCatching { inspectOnce(context, url, mode) }
             result.onSuccess {
                 return result
             }.onFailure {
@@ -170,6 +171,7 @@ object YtDlpClient {
     }
 
     private fun inspectOnce(
+        context: Context,
         url: String,
         mode: InspectionMode
     ): VideoInspection {
@@ -187,6 +189,10 @@ object YtDlpClient {
         }
         if (mode.forceIpv4) {
             request.addOption("--force-ipv4")
+        }
+
+        SessionStore(context).cookieFileOrNull()?.let { cookieFile ->
+            request.addOption("--cookies", cookieFile.absolutePath)
         }
 
         val response = YoutubeDL.getInstance().execute(request)
@@ -460,7 +466,7 @@ object YtDlpClient {
         return anonymousModes
             .filter { it.key != currentClientKey }
             .mapNotNull { mode ->
-                runCatching { inspectOnce(url.trim(), mode) }
+                runCatching { inspectOnce(context, url.trim(), mode) }
                     .getOrNull()
                     ?.let { inspection ->
                         val languageId = when {
