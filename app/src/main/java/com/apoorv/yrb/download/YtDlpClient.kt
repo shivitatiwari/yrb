@@ -334,7 +334,8 @@ object YtDlpClient {
 
 object FileSizeFormatter {
     fun format(bytes: Long?): String {
-        if (bytes == null || bytes <= 0L) return "Size unavailable"
+        if (bytes == null || bytes < 0L) return "Size unavailable"
+        if (bytes == 0L) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         var value = bytes.toDouble()
         var index = 0
