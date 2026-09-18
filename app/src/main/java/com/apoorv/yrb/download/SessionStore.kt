@@ -107,12 +107,36 @@ class SessionStore(private val context: Context) {
         }
     }
 
+    fun webViewSessionLooksAuthenticated(cookieManager: CookieManager): Boolean =
+        runCatching {
+            SessionCookieValidator.looksAuthenticated(
+                netscapeFromWebView(cookieManager)
+            )
+        }.getOrDefault(false)
+
     fun captureFromWebView(
         cookieManager: CookieManager,
         userAgent: String
     ): Result<SessionStatus> = runCatching {
         cookieManager.flush()
 
+        val netscape = netscapeFromWebView(cookieManager)
+
+        SessionCookieValidator.validateAndCount(netscape)
+        check(SessionCookieValidator.looksAuthenticated(netscape)) {
+            "A signed-in YouTube session was not detected yet. Finish signing in first."
+        }
+
+        cookieFile.parentFile?.mkdirs()
+        cookieFile.writeText(netscape)
+        prefs.edit().putString(KEY_USER_AGENT, userAgent).apply()
+
+        status().also {
+            check(it.connected) { "Could not save the signed-in YouTube session." }
+        }
+    }
+
+    private fun netscapeFromWebView(cookieManager: CookieManager): String {
         val sources = listOf(
             ".youtube.com" to "https://www.youtube.com/"
         )
@@ -146,24 +170,11 @@ class SessionStore(private val context: Context) {
             }
         }
 
-        val netscape = buildString {
+        return buildString {
             appendLine("# Netscape HTTP Cookie File")
             appendLine("# Generated locally by Yrb from the user's in-app YouTube session.")
             appendLine("# This file never leaves the device.")
             rows.forEach { appendLine(it) }
-        }
-
-        SessionCookieValidator.validateAndCount(netscape)
-        check(SessionCookieValidator.looksAuthenticated(netscape)) {
-            "A signed-in YouTube session was not detected yet. Finish signing in, then tap Use this session."
-        }
-
-        cookieFile.parentFile?.mkdirs()
-        cookieFile.writeText(netscape)
-        prefs.edit().putString(KEY_USER_AGENT, userAgent).apply()
-
-        status().also {
-            check(it.connected) { "Could not save the signed-in YouTube session." }
         }
     }
 
