@@ -548,21 +548,21 @@ class MainActivity : ComponentActivity() {
 
                             if (requiresYouTubeSession(message)) {
                                 FilledTonalButton(
+                                    modifier = Modifier.fillMaxWidth(),
                                     onClick = {
-                                        sessionLauncher.launch(
-                                            arrayOf(
-                                                "text/plain",
-                                                "text/*",
-                                                "application/octet-stream"
+                                        sessionLoginLauncher.launch(
+                                            Intent(
+                                                this@MainActivity,
+                                                YouTubeLoginActivity::class.java
                                             )
                                         )
                                     }
                                 ) {
                                     Text(
                                         if (sessionStatus.connected) {
-                                            "Replace YouTube session"
+                                            "Reconnect YouTube"
                                         } else {
-                                            "Import YouTube session"
+                                            "Sign in to YouTube"
                                         }
                                     )
                                 }
