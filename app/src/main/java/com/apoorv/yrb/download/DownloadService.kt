@@ -532,5 +532,8 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_QUALITY, quality.height)
                 .putExtra(EXTRA_SELECTOR, quality.selector)
                 .putExtra(EXTRA_ESTIMATED_BYTES, quality.estimatedBytes ?: -1L)
+
+        fun cancelIntent(context: android.content.Context): Intent =
+            Intent(context, DownloadService::class.java).setAction(ACTION_CANCEL)
     }
 }
