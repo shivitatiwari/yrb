@@ -55,14 +55,14 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/YRB-v1.8.0-debug.apk
-          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.0-release-unsigned.aab
+          cp app/build/outputs/apk/debug/app-debug.apk dist/YRB-v1.8.1-debug.apk
+          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.1-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: YRB-v1.8.0
+          name: YRB-v1.8.1
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -72,10 +72,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.8.0 \
+          gh release create v1.8.1 \
             --target "$GITHUB_SHA" \
-            --title "YRB by Apoorv v1.8.0" \
+            --title "YRB by Apoorv v1.8.1" \
             --notes "Adds rotating inspection and download preparation states, language-aware audio-only M4A downloads, MIME-aware opening, and YRB by Apoorv branding while preserving the com.apoorv.yrb application ID." \
-            dist/YRB-v1.8.0-debug.apk \
-            dist/YRB-v1.8.0-release-unsigned.aab \
+            dist/YRB-v1.8.1-debug.apk \
+            dist/YRB-v1.8.1-release-unsigned.aab \
             dist/SHA256SUMS.txt
