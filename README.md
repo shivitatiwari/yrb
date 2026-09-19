@@ -2,6 +2,22 @@
 
 YRB by Apoorv is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy video through a server.
 
+## v1.8.2
+
+v1.8.2 reduces distribution size without changing Yrb's yt-dlp/Python/FFmpeg downloader architecture.
+
+### Size optimization
+
+- Publish separate installable APKs for `arm64-v8a`, `armeabi-v7a`, `x86` and `x86_64` instead of one universal APK carrying every native architecture.
+- The `arm64-v8a` APK is the primary build for modern Android phones.
+- Enable R8 code shrinking and Android resource shrinking for optimized direct-install builds and the release bundle.
+- Replace the full `material-icons-extended` dependency with eight local vector icons used by Yrb.
+- Preserve yt-dlp, its bundled Python runtime, FFmpeg, language selection, audio-only downloads, high-resolution merging, History and live progress.
+
+### Loading timing
+
+- Inspection and pre-transfer preparation states now rotate every **4.7 seconds**.
+
 ## v1.8.0
 
 v1.8.0 improves perceived responsiveness and adds first-class audio-only downloads without moving media through a server.
@@ -93,8 +109,8 @@ Zero-byte output and yt-dlp's "downloaded file is empty" error are treated as re
 ## Android
 
 - Application ID: `com.apoorv.yrb`
-- versionCode: 9
-- versionName: 1.8.0
+- versionCode: 11
+- versionName: 1.8.2
 - minSdk: 30
 - targetSdk: 36
 - compileSdk: 36
@@ -115,9 +131,9 @@ Made by Apoorv Sandilya
 CI runs:
 
 ```bash
-gradle testDebugUnitTest lintDebug assembleDebug bundleRelease
+gradle testDebugUnitTest lintDebug assembleDirect bundleRelease
 ```
 
-The repository contains no production signing key. CI publishes an installable debug APK and an unsigned release AAB until production signing credentials are supplied securely.
+The repository contains no production signing key. CI publishes ABI-specific optimized direct-install APKs signed with the CI debug key plus an unsigned release AAB until production signing credentials are supplied securely.
 
 Only download content you own, are authorized to download, or that the service permits you to download.
