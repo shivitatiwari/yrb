@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.3
+
+- Fix the optimized APK regression where yt-dlp reported "instance not initialized".
+- Explicitly enable native-library extraction required by youtubedl-android.
+- Add idempotent yt-dlp + FFmpeg initialization before inspect and download paths.
+- Keep ABI-split APKs and local vector icons.
+- Disable R8/resource shrinking for direct APKs to prioritize runtime correctness.
+- Bump versionCode to 12 and versionName to 1.8.3.
+
 ## 1.8.2
 
 - Split direct-install APKs by ABI: arm64-v8a, armeabi-v7a, x86 and x86_64.
