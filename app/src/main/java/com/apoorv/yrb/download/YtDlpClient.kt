@@ -21,10 +21,15 @@ data class QualityOption(
     val extractorArgs: String? = null,
     val forceIpv4: Boolean = false,
     val clientKey: String = "default",
-    val audioLanguageId: String = "default"
+    val audioLanguageId: String = "default",
+    val audioOnly: Boolean = false
 ) {
     val label: String
-        get() = if (height == 2160) "4K" else height.toString() + "p"
+        get() = when {
+            audioOnly || height == 0 -> "Audio only"
+            height == 2160 -> "4K"
+            else -> height.toString() + "p"
+        }
 }
 
 data class VideoInspection(
@@ -32,12 +37,18 @@ data class VideoInspection(
     val durationSeconds: Long?,
     val audioLanguages: List<AudioLanguageOption>,
     val defaultLanguageId: String,
-    val qualitiesByLanguage: Map<String, List<QualityOption>>
+    val qualitiesByLanguage: Map<String, List<QualityOption>>,
+    val audioOnlyByLanguage: Map<String, QualityOption>
 ) {
     fun qualities(languageId: String): List<QualityOption> =
         qualitiesByLanguage[languageId]
             ?: qualitiesByLanguage[defaultLanguageId]
             ?: emptyList()
+
+    fun audioOnly(languageId: String): QualityOption? =
+        audioOnlyByLanguage[languageId]
+            ?: audioOnlyByLanguage[defaultLanguageId]
+            ?: audioOnlyByLanguage.values.firstOrNull()
 }
 
 object QualitySelector {
@@ -340,17 +351,37 @@ object YtDlpClient {
             )
         }.filterValues { it.isNotEmpty() }
 
-        if (qualitiesByLanguage.isEmpty()) {
-            error("No supported downloadable video resolutions were reported for this video.")
+        val audioOnlyByLanguage = languageIds.mapNotNull { languageId ->
+            val chosenAudio = selectedAudioByLanguage[languageId] ?: fallbackAudio
+                ?: return@mapNotNull null
+            val (bytes, approximate) = chosenAudio.estimatedSize(duration)
+            languageId to QualityOption(
+                height = 0,
+                selector = chosenAudio.id,
+                estimatedBytes = bytes,
+                approximate = approximate,
+                extractorArgs = mode.extractorArgs,
+                forceIpv4 = mode.forceIpv4,
+                clientKey = mode.key,
+                audioLanguageId = languageId,
+                audioOnly = true
+            )
+        }.toMap()
+
+        val availableLanguageIds =
+            (qualitiesByLanguage.keys + audioOnlyByLanguage.keys).toSet()
+
+        if (availableLanguageIds.isEmpty()) {
+            error("No supported downloadable video or audio streams were reported for this video.")
         }
 
-        val realDefault = if (qualitiesByLanguage.containsKey(defaultLanguageId)) {
+        val realDefault = if (availableLanguageIds.contains(defaultLanguageId)) {
             defaultLanguageId
         } else {
-            qualitiesByLanguage.keys.first()
+            availableLanguageIds.first()
         }
 
-        val visibleLanguages = languages.filter { qualitiesByLanguage.containsKey(it.id) }
+        val visibleLanguages = languages.filter { availableLanguageIds.contains(it.id) }
 
         return VideoInspection(
             title = root.optString("title").ifBlank { "YouTube video" },
@@ -359,7 +390,8 @@ object YtDlpClient {
                 listOf(AudioLanguageOption(realDefault, "Default audio"))
             },
             defaultLanguageId = realDefault,
-            qualitiesByLanguage = qualitiesByLanguage
+            qualitiesByLanguage = qualitiesByLanguage,
+            audioOnlyByLanguage = audioOnlyByLanguage
         )
     }
 
@@ -508,8 +540,12 @@ object YtDlpClient {
                                 audioLanguageId
                             else -> inspection.defaultLanguageId
                         }
-                        inspection.qualities(languageId)
-                            .firstOrNull { it.height == height }
+                        if (height == 0) {
+                            inspection.audioOnly(languageId)
+                        } else {
+                            inspection.qualities(languageId)
+                                .firstOrNull { it.height == height }
+                        }
                     }
             }
             .distinctBy { it.clientKey + "|" + it.selector }
