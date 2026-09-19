@@ -55,14 +55,14 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/Yrb-v1.7.0-debug.apk
-          cp app/build/outputs/bundle/release/app-release.aab dist/Yrb-v1.7.0-release-unsigned.aab
+          cp app/build/outputs/apk/debug/app-debug.apk dist/YRB-v1.8.0-debug.apk
+          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.0-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Yrb-v1.7.0
+          name: YRB-v1.8.0
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -72,4 +72,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.7.0             --target "$GITHUB_SHA"             --title "Yrb v1.7.0"             --notes "Yrb v1.7.0 simplifies the YouTube pipeline around one fast authenticated yt-dlp path. WebView sessions are exported from the browser cookie database with real domain/path/security/expiry metadata, the matching browser User-Agent is reused, authenticated extraction uses the current default+web_embedded client workaround, yt-dlp refresh runs in the background, empty-file/page-reload failures are recoverable, and yt-dlp now owns temp-to-final file movement. Existing quality, size, language, progress, History and notification features are preserved."             dist/Yrb-v1.7.0-debug.apk             dist/Yrb-v1.7.0-release-unsigned.aab             dist/SHA256SUMS.txt
+          gh release create v1.8.0 \
+            --target "$GITHUB_SHA" \
+            --title "YRB by Apoorv v1.8.0" \
+            --notes "Adds rotating inspection and download preparation states, language-aware audio-only M4A downloads, MIME-aware opening, and YRB by Apoorv branding while preserving the com.apoorv.yrb application ID." \
+            dist/YRB-v1.8.0-debug.apk \
+            dist/YRB-v1.8.0-release-unsigned.aab \
+            dist/SHA256SUMS.txt
