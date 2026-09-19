@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.2
+
+- Split direct-install APKs by ABI: arm64-v8a, armeabi-v7a, x86 and x86_64.
+- Make arm64-v8a the primary modern-phone distribution instead of shipping a universal APK with every native architecture.
+- Enable R8 code shrinking and resource shrinking for optimized builds.
+- Replace material-icons-extended with eight local vector assets.
+- Keep yt-dlp, bundled Python and FFmpeg unchanged so download behavior is preserved.
+- Keep both staged loading rotations at 4.7 seconds.
+- Bump versionCode to 11 and versionName to 1.8.2.
+
+## 1.8.1
+
+- Slow both staged loading-state rotations from 2.7 seconds to 4.7 seconds.
+- Bump versionCode to 10 and versionName to 1.8.1.
+
 ## 1.8.0
 
 - Rename the visible app branding to **YRB by Apoorv** while keeping application ID `com.apoorv.yrb`.
