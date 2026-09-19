@@ -61,17 +61,17 @@ jobs:
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
             src="$(find app/build/outputs/apk/direct -type f -name "*${abi}*direct*.apk" | head -1)"
             test -n "$src"
-            cp "$src" "dist/YRB-v1.8.2-${abi}.apk"
+            cp "$src" "dist/YRB-v1.8.3-${abi}.apk"
           done
 
-          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.2-release-unsigned.aab
+          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.3-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
           ls -lh dist
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: YRB-v1.8.2
+          name: YRB-v1.8.3
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -81,13 +81,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.8.2 \
+          gh release create v1.8.3 \
             --target "$GITHUB_SHA" \
-            --title "YRB by Apoorv v1.8.2" \
-            --notes "Size-optimized patch: replaces the extended Material icon pack with local vectors, enables R8/resource shrinking for optimized builds, and publishes separate ABI APKs while keeping the yt-dlp/Python/FFmpeg downloader architecture unchanged." \
-            dist/YRB-v1.8.2-arm64-v8a.apk \
-            dist/YRB-v1.8.2-armeabi-v7a.apk \
-            dist/YRB-v1.8.2-x86.apk \
-            dist/YRB-v1.8.2-x86_64.apk \
-            dist/YRB-v1.8.2-release-unsigned.aab \
+            --title "YRB by Apoorv v1.8.3" \
+            --notes "Runtime compatibility patch: keeps ABI-specific APKs and local vector icons, explicitly extracts yt-dlp native libraries, removes risky R8/resource shrinking from direct builds, and retries yt-dlp/FFmpeg initialization before inspection and downloads." \
+            dist/YRB-v1.8.3-arm64-v8a.apk \
+            dist/YRB-v1.8.3-armeabi-v7a.apk \
+            dist/YRB-v1.8.3-x86.apk \
+            dist/YRB-v1.8.3-x86_64.apk \
+            dist/YRB-v1.8.3-release-unsigned.aab \
             dist/SHA256SUMS.txt
