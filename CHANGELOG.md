@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.0
+
+- Rename the visible app branding to **YRB by Apoorv** while keeping application ID `com.apoorv.yrb`.
+- Replace the single inspection spinner with rotating status states every 2.7 seconds.
+- Add separate pre-transfer loading states on the download screen until real bytes/progress arrive.
+- Add language-aware audio-only download choices.
+- Finalize audio-only downloads as M4A on-device.
+- Reuse the existing yt-dlp session, retry, History, notification and cancellation pipeline for audio-only jobs.
+- Open completed audio/video files using their actual MIME type.
+- Keep the creator signature and contact links for Apoorv Sandilya.
+- Bump versionCode to 9 and versionName to 1.8.0.
+
 ## 1.7.0
 
 - Rebuild the normal YouTube path around one authenticated yt-dlp request.
