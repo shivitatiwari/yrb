@@ -31,15 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.Link
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -199,7 +190,7 @@ class MainActivity : ComponentActivity() {
                     navigationIcon = {
                         if (screen == SCREEN_DOWNLOADING) {
                             IconButton(onClick = { screen = SCREEN_HOME }) {
-                                Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
+                                Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back")
                             }
                         }
                     },
@@ -224,7 +215,7 @@ class MainActivity : ComponentActivity() {
                             selected = screen == SCREEN_HOME,
                             onClick = { screen = SCREEN_HOME },
                             icon = {
-                                Icon(Icons.Rounded.Download, contentDescription = null)
+                                Icon(painterResource(R.drawable.ic_download), contentDescription = null)
                             },
                             label = { Text("Download") }
                         )
@@ -232,7 +223,7 @@ class MainActivity : ComponentActivity() {
                             selected = screen == SCREEN_HISTORY,
                             onClick = { screen = SCREEN_HISTORY },
                             icon = {
-                                Icon(Icons.Rounded.History, contentDescription = null)
+                                Icon(painterResource(R.drawable.ic_history), contentDescription = null)
                             },
                             label = { Text("History") }
                         )
@@ -364,7 +355,7 @@ class MainActivity : ComponentActivity() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Rounded.CheckCircle,
+                                painterResource(R.drawable.ic_check_circle),
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
@@ -465,7 +456,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             leadingIcon = {
-                                Icon(Icons.Rounded.Link, contentDescription = null)
+                                Icon(painterResource(R.drawable.ic_link), contentDescription = null)
                             },
                             label = { Text("YouTube link") },
                             placeholder = { Text("youtube.com/watch?v=...") }
@@ -546,7 +537,7 @@ class MainActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.Top
                             ) {
                                 Icon(
-                                    Icons.Rounded.ErrorOutline,
+                                    painterResource(R.drawable.ic_error_outline),
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error
                                 )
@@ -786,7 +777,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Icon(
-                    Icons.Rounded.Download,
+                    painterResource(R.drawable.ic_download),
                     contentDescription = "Download " + option.label
                 )
             }
@@ -958,7 +949,7 @@ class MainActivity : ComponentActivity() {
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Rounded.CheckCircle, contentDescription = null)
+                            Icon(painterResource(R.drawable.ic_check_circle), contentDescription = null)
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Download complete", fontWeight = FontWeight.Bold)
                                 Text(
@@ -976,7 +967,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth(),
                             onClick = { openMedia(File(path)) }
                         ) {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                            Icon(painterResource(R.drawable.ic_play_arrow), contentDescription = null)
                             Spacer(Modifier.padding(horizontal = 4.dp))
                             Text(if (record.quality == 0) "Open audio" else "Open video")
                         }
@@ -1000,7 +991,7 @@ class MainActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    Icons.Rounded.ErrorOutline,
+                                    painterResource(R.drawable.ic_error_outline),
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error
                                 )
@@ -1026,7 +1017,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth(),
                         onClick = onBackHome
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null)
+                        Icon(painterResource(R.drawable.ic_refresh), contentDescription = null)
                         Spacer(Modifier.padding(horizontal = 4.dp))
                         Text("Back to downloads")
                     }
@@ -1106,7 +1097,7 @@ class MainActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Rounded.History, contentDescription = null)
+                    Icon(painterResource(R.drawable.ic_history), contentDescription = null)
                     Text("Nothing here yet", style = MaterialTheme.typography.titleLarge)
                     Text(
                         "Active and completed downloads will appear here.",
