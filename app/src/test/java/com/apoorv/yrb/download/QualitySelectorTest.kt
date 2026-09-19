@@ -13,6 +13,19 @@ class QualitySelectorTest {
     }
 
     @Test
+    fun audioOnlyOptionHasDedicatedLabel() {
+        val option = QualityOption(
+            height = 0,
+            selector = "audio",
+            estimatedBytes = 1024L,
+            approximate = false,
+            audioOnly = true
+        )
+
+        assertEquals("Audio only", option.label)
+    }
+
+    @Test
     fun anonymousFallbackOrderIsStable() {
         assertEquals(
             listOf("default", "ipv4", "web_safari_hls", "web_embedded"),
