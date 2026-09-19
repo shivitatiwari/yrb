@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.0
+
+- Cache successful raw yt-dlp inspection JSON for 10 minutes in app-private storage.
+- Reuse cached inspection data for the selected download through `--load-info-json` instead of extracting the same video twice.
+- Pass cached inspection paths through video, combined-format and audio-only quality options.
+- Remove forced yt-dlp update + duplicate extraction from the normal interactive Inspect failure path.
+- Disable normal-path metadata retries and format probing checks; use a 4-second socket timeout.
+- Delay the daily background yt-dlp updater by 60 seconds and stop runtime initialization from waiting on its synchronized lock.
+- Keep existing recovery extraction for genuinely rejected/expired media routes.
+- Preserve ABI-specific APKs, yt-dlp/Python/FFmpeg, audio languages, quality selection, progress, History and the 4.7-second staged loading UI.
+- Bump versionCode to 13 and versionName to 1.9.0.
+
 ## 1.8.3
 
 - Fix the optimized APK regression where yt-dlp reported "instance not initialized".
