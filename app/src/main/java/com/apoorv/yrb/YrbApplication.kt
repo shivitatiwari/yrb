@@ -20,6 +20,7 @@ class YrbApplication : Application() {
 
             Thread {
                 SessionStore(this).refreshFromWebViewDatabaseIfAvailable()
+                Thread.sleep(60_000L)
                 YtDlpRuntime.refreshIfDue(this)
             }.start()
         } catch (t: Throwable) {
