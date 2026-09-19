@@ -61,17 +61,17 @@ jobs:
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
             src="$(find app/build/outputs/apk/direct -type f -name "*${abi}*direct*.apk" | head -1)"
             test -n "$src"
-            cp "$src" "dist/YRB-v1.8.3-${abi}.apk"
+            cp "$src" "dist/YRB-v1.9.0-${abi}.apk"
           done
 
-          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.3-release-unsigned.aab
+          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.9.0-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
           ls -lh dist
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: YRB-v1.8.3
+          name: YRB-v1.9.0
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -81,13 +81,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.8.3 \
+          gh release create v1.9.0 \
             --target "$GITHUB_SHA" \
-            --title "YRB by Apoorv v1.8.3" \
-            --notes "Runtime compatibility patch: keeps ABI-specific APKs and local vector icons, explicitly extracts yt-dlp native libraries, removes risky R8/resource shrinking from direct builds, and retries yt-dlp/FFmpeg initialization before inspection and downloads." \
-            dist/YRB-v1.8.3-arm64-v8a.apk \
-            dist/YRB-v1.8.3-armeabi-v7a.apk \
-            dist/YRB-v1.8.3-x86.apk \
-            dist/YRB-v1.8.3-x86_64.apk \
-            dist/YRB-v1.8.3-release-unsigned.aab \
+            --title "YRB by Apoorv v1.9.0" \
+            --notes "Performance release: reuses the first yt-dlp inspection JSON for downloads via --load-info-json, removes forced updater/retry work from the interactive inspection path, keeps background updates out of startup latency, and preserves the runtime-safe ABI-specific APK packaging." \
+            dist/YRB-v1.9.0-arm64-v8a.apk \
+            dist/YRB-v1.9.0-armeabi-v7a.apk \
+            dist/YRB-v1.9.0-x86.apk \
+            dist/YRB-v1.9.0-x86_64.apk \
+            dist/YRB-v1.9.0-release-unsigned.aab \
             dist/SHA256SUMS.txt
