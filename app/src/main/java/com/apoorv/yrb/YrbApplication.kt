@@ -6,8 +6,6 @@ import android.util.Log
 import com.apoorv.yrb.data.HistoryStore
 import com.apoorv.yrb.download.SessionStore
 import com.apoorv.yrb.download.YtDlpRuntime
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
 import java.io.File
 
 class YrbApplication : Application() {
@@ -18,8 +16,7 @@ class YrbApplication : Application() {
         cleanupAbandonedPartials()
 
         try {
-            YoutubeDL.getInstance().init(this)
-            FFmpeg.getInstance().init(this)
+            YtDlpRuntime.ensureInitialized(this)
 
             Thread {
                 SessionStore(this).refreshFromWebViewDatabaseIfAvailable()
