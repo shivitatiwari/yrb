@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -89,6 +90,7 @@ import com.apoorv.yrb.download.VideoInspection
 import com.apoorv.yrb.download.YtDlpClient
 import com.apoorv.yrb.ui.theme.YrbTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -206,7 +208,7 @@ class MainActivity : ComponentActivity() {
                             when (screen) {
                                 SCREEN_HISTORY -> "History"
                                 SCREEN_DOWNLOADING -> "Download"
-                                else -> "Yrb"
+                                else -> "YRB by Apoorv"
                             },
                             fontWeight = FontWeight.SemiBold
                         )
@@ -275,11 +277,23 @@ class MainActivity : ComponentActivity() {
         var inspection by remember { mutableStateOf<VideoInspection?>(null) }
         var selectedLanguageId by remember { mutableStateOf<String?>(null) }
         var loading by remember { mutableStateOf(false) }
+        var inspectStatusIndex by remember { mutableIntStateOf(0) }
         var error by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
         val sessionStore = remember { SessionStore(this@MainActivity) }
         var sessionStatus by remember { mutableStateOf(sessionStore.status()) }
         var sessionNotice by remember { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(loading) {
+            if (loading) {
+                inspectStatusIndex = 0
+                while (true) {
+                    delay(2700L)
+                    inspectStatusIndex = (inspectStatusIndex + 1) % INSPECTION_STEPS.size
+                }
+            }
+        }
+
         val sessionLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.OpenDocument()
         ) { uri ->
@@ -486,7 +500,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         ) {
-                            Text(if (loading) "Checking…" else "Inspect video")
+                            Text(if (loading) "Inspecting…" else "Inspect video")
                         }
                     }
                 }
@@ -494,25 +508,23 @@ class MainActivity : ComponentActivity() {
 
             if (loading) {
                 item {
+                    val step = INSPECTION_STEPS[inspectStatusIndex % INSPECTION_STEPS.size]
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(18.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            CircularProgressIndicator(strokeWidth = 2.dp)
-                            Column {
-                                Text("Checking formats", fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    "Reading available video and audio streams on this phone.",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
+                            Text(step.first, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                step.second,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
@@ -579,6 +591,7 @@ class MainActivity : ComponentActivity() {
                     ?.label
                     ?: "Default audio"
                 val qualityOptions = info.qualities(languageId)
+                val audioOnlyOption = info.audioOnly(languageId)
 
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -598,7 +611,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         Text(
-                            "Tap a quality to start downloading.",
+                            "Choose a video quality or download only the selected audio track.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -625,6 +638,23 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    }
+                }
+
+                audioOnlyOption?.let { option ->
+                    item(key = "audio-only-" + languageId) {
+                        QualityCard(
+                            option = option,
+                            onClick = {
+                                val jobId = startDownload(
+                                    url = url.trim(),
+                                    title = info.title,
+                                    option = option,
+                                    audioLanguage = languageLabel
+                                )
+                                onJobStarted(jobId)
+                            }
+                        )
                     }
                 }
 
@@ -742,10 +772,13 @@ class MainActivity : ComponentActivity() {
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        if (option.estimatedBytes == null) {
-                            "YouTube did not expose a reliable size estimate."
-                        } else {
-                            "Video + audio total"
+                        when {
+                            option.estimatedBytes == null ->
+                                "YouTube did not expose a reliable size estimate."
+                            option.audioOnly ->
+                                "Audio track only • exported as M4A"
+                            else ->
+                                "Video + audio total"
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
@@ -781,6 +814,24 @@ class MainActivity : ComponentActivity() {
         }
 
         val active = DownloadStatus.isActive(record.status)
+        val preparing =
+            active && record.progress <= 0f && record.downloadedBytes <= 0L
+        val preparationSteps =
+            if (record.quality == 0) AUDIO_PREPARATION_STEPS else VIDEO_PREPARATION_STEPS
+        var preparationIndex by remember(record.id) { mutableIntStateOf(0) }
+
+        LaunchedEffect(record.id, preparing) {
+            if (preparing) {
+                preparationIndex = 0
+                while (true) {
+                    delay(2700L)
+                    preparationIndex = (preparationIndex + 1) % preparationSteps.size
+                }
+            }
+        }
+
+        val preparationStep =
+            preparationSteps[preparationIndex % preparationSteps.size]
 
         LazyColumn(
             modifier = modifier.fillMaxSize(),
@@ -824,18 +875,28 @@ class MainActivity : ComponentActivity() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                record.stage,
+                                if (preparing) preparationStep.first else record.stage,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                record.progress.roundToInt().toString() + "%",
+                                if (preparing) "Preparing" else record.progress.roundToInt().toString() + "%",
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        if (record.progress > 0f || record.estimatedBytes != null) {
+                        if (preparing) {
+                            Text(
+                                preparationStep.second,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+
+                        if (preparing) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        } else if (record.progress > 0f || record.estimatedBytes != null) {
                             LinearProgressIndicator(
                                 progress = { (record.progress / 100f).coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth()
@@ -913,11 +974,11 @@ class MainActivity : ComponentActivity() {
                     item {
                         Button(
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { openVideo(File(path)) }
+                            onClick = { openMedia(File(path)) }
                         ) {
                             Icon(Icons.Rounded.PlayArrow, contentDescription = null)
                             Spacer(Modifier.padding(horizontal = 4.dp))
-                            Text("Open video")
+                            Text(if (record.quality == 0) "Open audio" else "Open video")
                         }
                     }
                 }
@@ -1098,7 +1159,7 @@ class MainActivity : ComponentActivity() {
                 .clickable {
                     when {
                         active -> onOpenJob(record.id)
-                        canOpen -> openVideo(requireNotNull(file))
+                        canOpen -> openMedia(requireNotNull(file))
                     }
                 }
         ) {
@@ -1236,11 +1297,19 @@ class MainActivity : ComponentActivity() {
         return jobId
     }
 
-    private fun openVideo(file: File) {
+    private fun openMedia(file: File) {
         if (!file.exists()) return
         val uri = FileProvider.getUriForFile(this, packageName + ".files", file)
+        val extension = file.extension.lowercase()
+        val mime = MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(extension)
+            ?: if (extension in setOf("m4a", "mp3", "aac", "ogg", "opus")) {
+                "audio/*"
+            } else {
+                "video/*"
+            }
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "video/*")
+            setDataAndType(uri, mime)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runCatching { startActivity(intent) }
@@ -1262,7 +1331,11 @@ class MainActivity : ComponentActivity() {
         }.getOrDefault(false)
 
     private fun qualityLabel(quality: Int): String =
-        if (quality == 2160) "4K" else quality.toString() + "p"
+        when (quality) {
+            0 -> "Audio only"
+            2160 -> "4K"
+            else -> quality.toString() + "p"
+        }
 
     private fun formatDuration(seconds: Long): String {
         val safe = seconds.coerceAtLeast(0L)
@@ -1292,5 +1365,30 @@ class MainActivity : ComponentActivity() {
         private const val SCREEN_HOME = 0
         private const val SCREEN_HISTORY = 1
         private const val SCREEN_DOWNLOADING = 2
+
+        private val INSPECTION_STEPS = listOf(
+            "Reading video details" to "Checking the title, duration and available media streams.",
+            "Finding video streams" to "Looking for the resolutions YouTube exposes for this video.",
+            "Finding audio tracks" to "Checking the best audio stream for the selected video.",
+            "Finding languages" to "Looking for alternate and original-language audio tracks.",
+            "Checking quality options" to "Matching available resolutions with their audio streams.",
+            "Preparing choices" to "Calculating sizes and getting the download options ready."
+        )
+
+        private val VIDEO_PREPARATION_STEPS = listOf(
+            "Fetching video" to "Opening the selected YouTube media route.",
+            "Locking selected quality" to "Keeping the resolution you chose for this download.",
+            "Matching audio track" to "Pairing the selected language with the video stream.",
+            "Preparing local download" to "Setting up the on-device download and merge pipeline.",
+            "Starting transfer" to "Waiting for the first media bytes from YouTube."
+        )
+
+        private val AUDIO_PREPARATION_STEPS = listOf(
+            "Fetching audio" to "Opening the selected YouTube audio stream.",
+            "Locking selected language" to "Keeping the audio language you chose.",
+            "Preparing audio track" to "Setting up the audio-only download on this phone.",
+            "Preparing M4A" to "Getting the final audio container ready.",
+            "Starting transfer" to "Waiting for the first audio bytes from YouTube."
+        )
     }
 }
