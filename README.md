@@ -1,6 +1,29 @@
-# Yrb
+# YRB by Apoorv
 
-Yrb is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy video through a server.
+YRB by Apoorv is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy video through a server.
+
+## v1.8.0
+
+v1.8.0 improves perceived responsiveness and adds first-class audio-only downloads without moving media through a server.
+
+### Loading experience
+
+- Inspect now cycles through clear on-device states every 2.7 seconds: video details, video streams, audio tracks, languages, quality options and final choices.
+- The download screen shows a separate preparation sequence while the job has not written its first media bytes.
+- Once real download bytes/progress arrive, the UI switches back to real progress, speed, ETA and written bytes.
+
+### Audio-only
+
+- Every detected audio language can expose an **Audio only** choice.
+- The selected audio stream uses the same yt-dlp session, retry, progress, History and notification pipeline as video.
+- Audio-only downloads are finalized as M4A with FFmpeg on-device.
+- Completed audio opens with its real MIME type.
+
+### Branding
+
+- Launcher/app name: **YRB by Apoorv**
+- Application ID remains **com.apoorv.yrb** so installed-app identity stays stable.
+- Creator signature remains **Made by Apoorv Sandilya** with the existing contact links.
 
 ## v1.7.0
 
@@ -70,8 +93,8 @@ Zero-byte output and yt-dlp's "downloaded file is empty" error are treated as re
 ## Android
 
 - Application ID: `com.apoorv.yrb`
-- versionCode: 8
-- versionName: 1.7.0
+- versionCode: 9
+- versionName: 1.8.0
 - minSdk: 30
 - targetSdk: 36
 - compileSdk: 36
