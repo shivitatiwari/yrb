@@ -2,6 +2,26 @@
 
 YRB by Apoorv is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy video through a server.
 
+## v1.9.0
+
+v1.9.0 removes duplicated yt-dlp extraction work from the normal inspect → download flow.
+
+### Faster inspection
+
+- Normal inspection performs one yt-dlp extractor pass instead of force-updating yt-dlp and rerunning extraction on a recoverable error.
+- Interactive metadata requests use a 4-second socket timeout, zero generic retries, zero extractor retries and `--no-check-formats`.
+- yt-dlp's once-daily updater stays in the background and is delayed 60 seconds after app startup so it does not block the first inspection.
+- Runtime initialization no longer shares the updater's synchronized lock.
+
+### Faster download start
+
+- The successful inspection JSON is stored for 10 minutes in app-private no-backup storage.
+- Every quality/audio choice carries the path to that exact cached inspection.
+- Pressing Download uses yt-dlp's `--load-info-json` path, so yt-dlp can select and download the chosen stream without extracting the same YouTube page again.
+- If the cached media route has expired or YouTube rejects it, the existing recovery path can still re-extract alternate routes.
+
+The first inspection still depends on YouTube/network/yt-dlp latency, so a universal 3–4 second guarantee is not possible, but the app no longer intentionally repeats expensive extraction work.
+
 ## v1.8.3
 
 v1.8.3 fixes the yt-dlp runtime initialization regression introduced by the first size-optimized ABI build.
@@ -119,8 +139,8 @@ Zero-byte output and yt-dlp's "downloaded file is empty" error are treated as re
 ## Android
 
 - Application ID: `com.apoorv.yrb`
-- versionCode: 12
-- versionName: 1.8.3
+- versionCode: 13
+- versionName: 1.9.0
 - minSdk: 30
 - targetSdk: 36
 - compileSdk: 36
