@@ -288,7 +288,7 @@ class MainActivity : ComponentActivity() {
             if (loading) {
                 inspectStatusIndex = 0
                 while (true) {
-                    delay(2700L)
+                    delay(4700L)
                     inspectStatusIndex = (inspectStatusIndex + 1) % INSPECTION_STEPS.size
                 }
             }
@@ -824,7 +824,7 @@ class MainActivity : ComponentActivity() {
             if (preparing) {
                 preparationIndex = 0
                 while (true) {
-                    delay(2700L)
+                    delay(4700L)
                     preparationIndex = (preparationIndex + 1) % preparationSteps.size
                 }
             }
