@@ -18,9 +18,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -105,7 +103,7 @@ class YouTubeLoginActivity : ComponentActivity() {
                     ),
                     navigationIcon = {
                         IconButton(onClick = onClose) {
-                            Icon(Icons.Rounded.ArrowBack, contentDescription = "Close")
+                            Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Close")
                         }
                     },
                     title = {
@@ -155,7 +153,7 @@ class YouTubeLoginActivity : ComponentActivity() {
                             }
                         }
                     ) {
-                        Icon(Icons.Rounded.CheckCircle, contentDescription = null)
+                        Icon(painterResource(R.drawable.ic_check_circle), contentDescription = null)
                         Text(
                             if (saving) "Saving session…" else "Use this session",
                             modifier = Modifier.padding(start = 8.dp)
