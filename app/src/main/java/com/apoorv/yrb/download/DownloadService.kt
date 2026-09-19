@@ -52,6 +52,7 @@ class DownloadService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannels()
+        YtDlpRuntime.ensureInitialized(this)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
