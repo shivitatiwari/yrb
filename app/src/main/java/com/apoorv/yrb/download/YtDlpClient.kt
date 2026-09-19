@@ -4,6 +4,8 @@ import android.content.Context
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONObject
+import java.io.File
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToLong
@@ -22,7 +24,8 @@ data class QualityOption(
     val forceIpv4: Boolean = false,
     val clientKey: String = "default",
     val audioLanguageId: String = "default",
-    val audioOnly: Boolean = false
+    val audioOnly: Boolean = false,
+    val infoJsonPath: String? = null
 ) {
     val label: String
         get() = when {
@@ -149,6 +152,8 @@ object YtDlpClient {
             cache.remove(cacheKey)
         }
 
+        cleanupInspectionCache(context, now)
+
         val mode = if (cookieFile != null) {
             MODE_AUTHENTICATED
         } else {
@@ -156,23 +161,15 @@ object YtDlpClient {
         }
 
         val inspection = runCatching {
-            inspectOnce(context, normalized, mode)
-        }.getOrElse { firstError ->
-            if (!shouldTryRecovery(firstError)) throw firstError
-
-            YtDlpRuntime.refreshIfDue(context, force = true)
-
-            runCatching {
-                inspectOnce(context, normalized, mode)
-            }.getOrElse { finalError ->
-                throw IllegalStateException(
-                    friendlyInspectionFailure(
-                        finalError,
-                        authenticated = cookieFile != null
-                    ),
-                    finalError
-                )
-            }
+            inspectOnce(context, normalized, mode, cacheKey)
+        }.getOrElse { error ->
+            throw IllegalStateException(
+                friendlyInspectionFailure(
+                    error,
+                    authenticated = cookieFile != null
+                ),
+                error
+            )
         }
 
         cache[cacheKey] = CachedInspection(now, inspection)
@@ -187,7 +184,9 @@ object YtDlpClient {
         var lastError: Throwable? = null
 
         for (mode in modes) {
-            val result = runCatching { inspectOnce(context, url, mode) }
+            val result = runCatching {
+                inspectOnce(context, url, mode, url.trim() + "|recovery|" + mode.key)
+            }
             result.onSuccess {
                 return result
             }.onFailure {
@@ -204,7 +203,8 @@ object YtDlpClient {
     private fun inspectOnce(
         context: Context,
         url: String,
-        mode: InspectionMode
+        mode: InspectionMode,
+        cacheKey: String
     ): VideoInspection {
         val request = YoutubeDLRequest(url)
             .addOption("--dump-single-json")
@@ -212,8 +212,10 @@ object YtDlpClient {
             .addOption("--no-playlist")
             .addOption("--no-warnings")
             .addOption("--quiet")
-            .addOption("--socket-timeout", "5")
-            .addOption("--retries", "1")
+            .addOption("--no-check-formats")
+            .addOption("--socket-timeout", "4")
+            .addOption("--retries", "0")
+            .addOption("--extractor-retries", "0")
 
         mode.extractorArgs?.let {
             request.addOption("--extractor-args", it)
@@ -231,7 +233,9 @@ object YtDlpClient {
         }
 
         val response = YoutubeDL.getInstance().execute(request)
-        val root = JSONObject(response.out.trim())
+        val rawInfoJson = response.out.trim()
+        val root = JSONObject(rawInfoJson)
+        val infoJsonPath = persistInspectionInfo(context, cacheKey, rawInfoJson)
         val duration = root.optDouble("duration", -1.0)
             .takeIf { it > 0.0 }
             ?.roundToLong()
@@ -348,7 +352,8 @@ object YtDlpClient {
                 durationSeconds = duration,
                 allowCombinedFallback = languageIds.size == 1,
                 languageId = languageId,
-                mode = mode
+                mode = mode,
+                infoJsonPath = infoJsonPath
             )
         }.filterValues { it.isNotEmpty() }
 
@@ -365,7 +370,8 @@ object YtDlpClient {
                 forceIpv4 = mode.forceIpv4,
                 clientKey = mode.key,
                 audioLanguageId = languageId,
-                audioOnly = true
+                audioOnly = true,
+                infoJsonPath = infoJsonPath
             )
         }.toMap()
 
@@ -402,7 +408,8 @@ object YtDlpClient {
         durationSeconds: Long?,
         allowCombinedFallback: Boolean,
         languageId: String,
-        mode: InspectionMode
+        mode: InspectionMode,
+        infoJsonPath: String
     ): List<QualityOption> {
         return QualitySelector.supported.mapNotNull { height ->
             val exact = candidates.filter { it.height == height }
@@ -431,7 +438,8 @@ object YtDlpClient {
                     extractorArgs = mode.extractorArgs,
                     forceIpv4 = mode.forceIpv4,
                     clientKey = mode.key,
-                    audioLanguageId = languageId
+                    audioLanguageId = languageId,
+                    infoJsonPath = infoJsonPath
                 )
             } else if (allowCombinedFallback) {
                 val combined = exact
@@ -470,6 +478,32 @@ object YtDlpClient {
 
         return RECOVERABLE_MARKERS.any { marker -> message.contains(marker) }
     }
+
+    private fun persistInspectionInfo(
+        context: Context,
+        cacheKey: String,
+        rawJson: String
+    ): String {
+        val dir = File(context.noBackupFilesDir, INSPECTION_CACHE_DIR)
+        if (!dir.exists()) dir.mkdirs()
+        val file = File(dir, sha256(cacheKey) + ".json")
+        file.writeText(rawJson, Charsets.UTF_8)
+        return file.absolutePath
+    }
+
+    private fun cleanupInspectionCache(context: Context, now: Long) {
+        val dir = File(context.noBackupFilesDir, INSPECTION_CACHE_DIR)
+        dir.listFiles()?.forEach { file ->
+            if (!file.isFile || now - file.lastModified() > CACHE_TTL_MS) {
+                runCatching { file.delete() }
+            }
+        }
+    }
+
+    private fun sha256(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte) }
 
     private fun friendlyInspectionFailure(
         error: Throwable,
@@ -528,12 +562,17 @@ object YtDlpClient {
         audioLanguageId: String,
         currentClientKey: String
     ): List<QualityOption> {
-        YtDlpRuntime.refreshIfDue(context, force = true)
-
         return anonymousModes
             .filter { it.key != currentClientKey }
             .mapNotNull { mode ->
-                runCatching { inspectOnce(context, url.trim(), mode) }
+                runCatching {
+                    inspectOnce(
+                        context,
+                        url.trim(),
+                        mode,
+                        url.trim() + "|recovery|" + mode.key + "|" + System.currentTimeMillis()
+                    )
+                }
                     .getOrNull()
                     ?.let { inspection ->
                         val languageId = when {
@@ -573,6 +612,7 @@ object YtDlpClient {
         MODE_AUTHENTICATED.extractorArgs.orEmpty()
 
     private const val DEFAULT_LANGUAGE = "default"
+    private const val INSPECTION_CACHE_DIR = "yt-dlp-inspection-cache"
 
     private val RECOVERABLE_MARKERS = listOf(
         "sign in to confirm",
