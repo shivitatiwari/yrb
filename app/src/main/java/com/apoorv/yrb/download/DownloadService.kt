@@ -89,7 +89,7 @@ class DownloadService : Service() {
         val audioLanguageId = intent.getStringExtra(EXTRA_AUDIO_LANGUAGE_ID) ?: "default"
         val estimatedBytes = intent.getLongExtra(EXTRA_ESTIMATED_BYTES, -1L).takeIf { it > 0L }
 
-        if (quality !in QualitySelector.supported) return START_NOT_STICKY
+        if (quality != 0 && quality !in QualitySelector.supported) return START_NOT_STICKY
 
         val processId = "yrb-" + jobId
         activeProcessId = processId
@@ -171,7 +171,8 @@ class DownloadService : Service() {
                 extractorArgs = extractorArgs,
                 forceIpv4 = forceIpv4,
                 clientKey = clientKey,
-                audioLanguageId = audioLanguageId
+                audioLanguageId = audioLanguageId,
+                audioOnly = quality == 0
             )
 
             val attempts = mutableListOf(initialOption)
@@ -518,7 +519,16 @@ class DownloadService : Service() {
             .addOption("--no-playlist")
             .addOption("--no-mtime")
             .addOption("-f", option.selector)
-            .addOption("--merge-output-format", "mp4/mkv")
+
+        if (option.audioOnly) {
+            request
+                .addOption("--extract-audio")
+                .addOption("--audio-format", "m4a")
+        } else {
+            request.addOption("--merge-output-format", "mp4/mkv")
+        }
+
+        request
             .addOption("--newline")
             .addOption("--concurrent-fragments", "4")
             .addOption("--retries", "2")
@@ -570,6 +580,13 @@ class DownloadService : Service() {
 
                 if (ProgressLineParser.isMerging(line)) {
                     telemetry.stage.set("Merging")
+                    telemetry.rawSpeed.set(-1L)
+                    telemetry.rawEta.set(-1L)
+                } else if (
+                    option.audioOnly &&
+                    line?.contains("[ExtractAudio]", ignoreCase = true) == true
+                ) {
+                    telemetry.stage.set("Finishing audio")
                     telemetry.rawSpeed.set(-1L)
                     telemetry.rawEta.set(-1L)
                 } else if (line?.contains("[download]", ignoreCase = true) == true) {
