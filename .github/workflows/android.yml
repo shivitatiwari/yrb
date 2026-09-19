@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-main
   cancel-in-progress: true
 
 jobs:
