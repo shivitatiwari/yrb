@@ -89,6 +89,7 @@ class DownloadService : Service() {
         val clientKey = intent.getStringExtra(EXTRA_CLIENT_KEY) ?: "default"
         val audioLanguageId = intent.getStringExtra(EXTRA_AUDIO_LANGUAGE_ID) ?: "default"
         val estimatedBytes = intent.getLongExtra(EXTRA_ESTIMATED_BYTES, -1L).takeIf { it > 0L }
+        val infoJsonPath = intent.getStringExtra(EXTRA_INFO_JSON_PATH)
 
         if (quality != 0 && quality !in QualitySelector.supported) return START_NOT_STICKY
 
@@ -131,6 +132,7 @@ class DownloadService : Service() {
                 clientKey = clientKey,
                 audioLanguageId = audioLanguageId,
                 estimatedBytes = estimatedBytes,
+                infoJsonPath = infoJsonPath,
                 processId = processId,
                 startId = startId
             )
@@ -149,6 +151,7 @@ class DownloadService : Service() {
         clientKey: String,
         audioLanguageId: String,
         estimatedBytes: Long?,
+        infoJsonPath: String?,
         processId: String,
         startId: Int
     ) {
@@ -173,7 +176,8 @@ class DownloadService : Service() {
                 forceIpv4 = forceIpv4,
                 clientKey = clientKey,
                 audioLanguageId = audioLanguageId,
-                audioOnly = quality == 0
+                audioOnly = quality == 0,
+                infoJsonPath = infoJsonPath
             )
 
             val attempts = mutableListOf(initialOption)
@@ -519,7 +523,16 @@ class DownloadService : Service() {
         processId: String,
         telemetry: AttemptTelemetry
     ): YoutubeDLResponse {
-        val request = YoutubeDLRequest(url)
+        val cachedInfo = option.infoJsonPath
+            ?.let(::File)
+            ?.takeIf { it.isFile && it.length() > 0L }
+
+        val request = if (cachedInfo != null) {
+            YoutubeDLRequest(emptyList())
+                .addOption("--load-info-json", cachedInfo.absolutePath)
+        } else {
+            YoutubeDLRequest(url)
+        }
             .addOption("--no-playlist")
             .addOption("--no-mtime")
             .addOption("-f", option.selector)
@@ -828,6 +841,7 @@ class DownloadService : Service() {
         private const val EXTRA_CLIENT_KEY = "client_key"
         private const val EXTRA_AUDIO_LANGUAGE_ID = "audio_language_id"
         private const val EXTRA_ESTIMATED_BYTES = "estimated_bytes"
+        private const val EXTRA_INFO_JSON_PATH = "info_json_path"
         private const val CHANNEL_DOWNLOADS = "downloads"
         private const val CHANNEL_RESULTS = "download_results"
         private const val PROGRESS_NOTIFICATION_ID = 1001
@@ -852,6 +866,7 @@ class DownloadService : Service() {
                 .putExtra(EXTRA_CLIENT_KEY, quality.clientKey)
                 .putExtra(EXTRA_AUDIO_LANGUAGE_ID, quality.audioLanguageId)
                 .putExtra(EXTRA_ESTIMATED_BYTES, quality.estimatedBytes ?: -1L)
+                .putExtra(EXTRA_INFO_JSON_PATH, quality.infoJsonPath)
 
         fun cancelIntent(context: android.content.Context): Intent =
             Intent(context, DownloadService::class.java).setAction(ACTION_CANCEL)
