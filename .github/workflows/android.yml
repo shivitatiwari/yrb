@@ -46,23 +46,32 @@ jobs:
       - name: Lint
         run: gradle --no-daemon lintDebug
 
-      - name: Build installable APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build optimized installable ABI APKs
+        run: gradle --no-daemon assembleDirect
 
       - name: Build release AAB
         run: gradle --no-daemon bundleRelease
 
       - name: Stage artifacts
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/YRB-v1.8.1-debug.apk
-          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.1-release-unsigned.aab
+
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            src="$(find app/build/outputs/apk/direct -type f -name "*${abi}*direct*.apk" | head -1)"
+            test -n "$src"
+            cp "$src" "dist/YRB-v1.8.2-${abi}.apk"
+          done
+
+          cp app/build/outputs/bundle/release/app-release.aab dist/YRB-v1.8.2-release-unsigned.aab
           sha256sum dist/* > dist/SHA256SUMS.txt
+          ls -lh dist
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: YRB-v1.8.1
+          name: YRB-v1.8.2
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -72,10 +81,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.8.1 \
+          gh release create v1.8.2 \
             --target "$GITHUB_SHA" \
-            --title "YRB by Apoorv v1.8.1" \
-            --notes "Adds rotating inspection and download preparation states, language-aware audio-only M4A downloads, MIME-aware opening, and YRB by Apoorv branding while preserving the com.apoorv.yrb application ID." \
-            dist/YRB-v1.8.1-debug.apk \
-            dist/YRB-v1.8.1-release-unsigned.aab \
+            --title "YRB by Apoorv v1.8.2" \
+            --notes "Size-optimized patch: replaces the extended Material icon pack with local vectors, enables R8/resource shrinking for optimized builds, and publishes separate ABI APKs while keeping the yt-dlp/Python/FFmpeg downloader architecture unchanged." \
+            dist/YRB-v1.8.2-arm64-v8a.apk \
+            dist/YRB-v1.8.2-armeabi-v7a.apk \
+            dist/YRB-v1.8.2-x86.apk \
+            dist/YRB-v1.8.2-x86_64.apk \
+            dist/YRB-v1.8.2-release-unsigned.aab \
             dist/SHA256SUMS.txt
