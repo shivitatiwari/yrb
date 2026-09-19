@@ -134,6 +134,7 @@ object YtDlpClient {
     )
 
     fun inspect(context: Context, url: String): VideoInspection {
+        YtDlpRuntime.ensureInitialized(context)
         val normalized = url.trim()
         val sessionStore = SessionStore(context)
         val cookieFile = sessionStore.cookieFileOrNull()
