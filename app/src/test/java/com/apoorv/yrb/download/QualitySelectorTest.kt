@@ -26,6 +26,19 @@ class QualitySelectorTest {
     }
 
     @Test
+    fun cachedInspectionPathStaysWithQualityOption() {
+        val option = QualityOption(
+            height = 1080,
+            selector = "137+140",
+            estimatedBytes = null,
+            approximate = true,
+            infoJsonPath = "/private/inspection.json"
+        )
+
+        assertEquals("/private/inspection.json", option.infoJsonPath)
+    }
+
+    @Test
     fun anonymousFallbackOrderIsStable() {
         assertEquals(
             listOf("default", "ipv4", "web_safari_hls", "web_embedded"),
