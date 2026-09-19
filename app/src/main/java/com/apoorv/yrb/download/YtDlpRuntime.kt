@@ -2,9 +2,17 @@ package com.apoorv.yrb.download
 
 import android.content.Context
 import android.util.Log
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 
 object YtDlpRuntime {
+    @Synchronized
+    fun ensureInitialized(context: Context) {
+        val appContext = context.applicationContext
+        YoutubeDL.getInstance().init(appContext)
+        FFmpeg.getInstance().init(appContext)
+    }
+
     private const val PREFS = "yt_dlp_runtime"
     private const val LAST_SUCCESS = "last_success"
     private const val CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
