@@ -14,14 +14,14 @@ android {
         applicationId = "com.apoorv.yrb"
         minSdk = 30
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.8.2"
+        versionCode = 12
+        versionName = "1.8.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -33,8 +33,8 @@ android {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             isDebuggable = false
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             matchingFallbacks += listOf("release")
         }
     }
