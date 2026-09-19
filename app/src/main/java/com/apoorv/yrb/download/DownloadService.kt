@@ -448,6 +448,7 @@ class DownloadService : Service() {
             val speed = if (
                 stage == "Merging" ||
                 stage == "Finalizing" ||
+                stage == "Finishing audio" ||
                 stage.startsWith("Switching")
             ) {
                 0L
@@ -469,7 +470,9 @@ class DownloadService : Service() {
             maxProgress = max(maxProgress, candidateProgress)
 
             val eta = when {
-                stage == "Merging" || stage == "Finalizing" -> null
+                stage == "Merging" ||
+                    stage == "Finalizing" ||
+                    stage == "Finishing audio" -> null
                 estimatedBytes != null &&
                     estimatedBytes > bytes &&
                     speed > 0L ->
@@ -692,7 +695,11 @@ class DownloadService : Service() {
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val qualityLabel = if (quality == 2160) "4K" else quality.toString() + "p"
+        val qualityLabel = when (quality) {
+            0 -> "Audio only"
+            2160 -> "4K"
+            else -> quality.toString() + "p"
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_RESULTS)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
