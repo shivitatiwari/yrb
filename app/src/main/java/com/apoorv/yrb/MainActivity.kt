@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
                             when (screen) {
                                 SCREEN_HISTORY -> "History"
                                 SCREEN_DOWNLOADING -> "Download"
-                                else -> "YRB by Apoorv"
+                                else -> "Yrb by Apoorv"
                             },
                             fontWeight = FontWeight.SemiBold
                         )
