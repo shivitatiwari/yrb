@@ -2,6 +2,16 @@
 
 YRB by Apoorv is a native Android YouTube downloader. yt-dlp and FFmpeg run on the phone; Yrb does not proxy video through a server.
 
+## v1.8.3
+
+v1.8.3 fixes the yt-dlp runtime initialization regression introduced by the first size-optimized ABI build.
+
+- Explicitly sets `android:extractNativeLibs="true"`, as required by youtubedl-android.
+- Keeps separate ABI APKs and local vector icons for the major size reduction.
+- Disables R8/resource shrinking on direct-install builds to avoid stripping or repackaging runtime pieces used by the embedded Python/yt-dlp stack.
+- Makes yt-dlp + FFmpeg initialization idempotent and retries it immediately before video inspection and background downloads.
+- Preserves all downloader features and the 4.7-second staged loading timing.
+
 ## v1.8.2
 
 v1.8.2 reduces distribution size without changing Yrb's yt-dlp/Python/FFmpeg downloader architecture.
@@ -109,8 +119,8 @@ Zero-byte output and yt-dlp's "downloaded file is empty" error are treated as re
 ## Android
 
 - Application ID: `com.apoorv.yrb`
-- versionCode: 11
-- versionName: 1.8.2
+- versionCode: 12
+- versionName: 1.8.3
 - minSdk: 30
 - targetSdk: 36
 - compileSdk: 36
