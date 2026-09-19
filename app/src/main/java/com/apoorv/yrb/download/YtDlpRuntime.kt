@@ -6,7 +6,6 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 
 object YtDlpRuntime {
-    @Synchronized
     fun ensureInitialized(context: Context) {
         val appContext = context.applicationContext
         YoutubeDL.getInstance().init(appContext)
