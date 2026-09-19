@@ -460,7 +460,8 @@ object YtDlpClient {
                     extractorArgs = mode.extractorArgs,
                     forceIpv4 = mode.forceIpv4,
                     clientKey = mode.key,
-                    audioLanguageId = languageId
+                    audioLanguageId = languageId,
+                    infoJsonPath = infoJsonPath
                 )
             } else {
                 null
